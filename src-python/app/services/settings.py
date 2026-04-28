@@ -25,15 +25,9 @@
      - reset_settings() — 恢复出厂默认设置
      - validate_settings() — 对设置值进行合法性校验
 
-  3. AI 模型配置层次：
-     - AIPrimaryModelSettings   — 主模型配置（AI 聊天和 Agent 共享的默认模型）
-     - AISettings               — AI 设置根模型，包含主模型配置和向后兼容的 providers 字段
-     - AgentModelSettings       — Agent 各角色（路由、规划、分析、判定、执行、摘要）的模型配置
-     - AgentSettings            — Agent 总体设置，聚合所有角色模型和规划器/安全策略
-
-  4. Agent 安全策略：
-     - AgentPlannerSettings         — 规划器行为：是否启用 LLM 规划、是否允许规则回退、可观测性开关
-     - AgentExecutionSafetySettings — 执行安全策略：危险操作策略（plan_only / allow_approved）、dry_run、自动审批
+  3. AI 模型配置：
+     - AIPrimaryModelSettings — 主模型配置（AI 聊天的默认模型）
+     - AISettings             — AI 设置根模型，包含主模型配置和向后兼容的 providers 字段
 """
 
 import json
@@ -44,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ==================== 设置模型 ====================
@@ -117,21 +111,15 @@ class SSHSettings(BaseModel):
 
 
 class AIPrimaryModelSettings(BaseModel):
-    """主模型配置 — AI 聊天和 Agent 共享的默认模型
+    """主模型配置 — AI 聊天的默认模型
 
     这是整个 AI 子系统的"默认模型"配置，被 AISettings 持有。
-    所有 AI 功能和 Agent 角色在没有单独配置模型时，都会回退到此处定义的模型。
 
     字段:
         provider — 模型提供商标识，如 "openai"、"anthropic"、"deepseek" 等
         model    — 模型名称，如 "gpt-4o-mini"、"claude-3.5-sonnet" 等
         api_key  — API 密钥（可选，未设置时尝试从旧版 providers 字段补充）
         base_url — API 端点地址（可选，未设置时使用 provider 默认地址）
-
-    关键方法:
-        to_agent_model_settings() — 将主模型配置转换为 AgentModelSettings 格式，
-                                    供 Agent 各角色模型消费。转换时 base_url 提供默认值
-                                    "https://api.openai.com/v1"。
     """
 
     provider: str = "openai"
@@ -139,244 +127,21 @@ class AIPrimaryModelSettings(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 
-    def to_agent_model_settings(self) -> "AgentModelSettings":
-        """转换为 AgentModelSettings 格式（供 Agent 消费）
-
-        将主模型配置的字段映射为 Agent 模型期望的字段名（provider -> provider, model -> model_name）。
-        如果 base_url 未设置，使用 OpenAI 默认端点作为后备。
-        """
-        return AgentModelSettings(
-            provider=self.provider,
-            model_name=self.model,
-            api_key=self.api_key,
-            base_url=self.base_url or "https://api.openai.com/v1",
-        )
-
 
 class AISettings(BaseModel):
     """AI 设置 — 统一管理主模型配置
 
-    这是 AI 子系统的根设置节点，包含：
-      - primary_model: 新版统一主模型配置（AIPrimaryModelSettings）
-      - providers / currentProvider: 旧版向后兼容字段
-
-    配置解析层次（由 get_effective_primary_model 实现）：
-      1. 如果 primary_model 已含 api_key → 直接使用
-      2. 否则，尝试从 providers[currentProvider] 中读取 api_key 等字段来补充
-      3. 都没有 → 返回原始 primary_model（无 API key，后端会使用环境变量或内置默认值）
-
-    向后兼容说明：
-      providers 和 currentProvider 是早期版本的配置格式，前端设置页面仍可能写入这些字段。
-      新版代码应优先使用 primary_model。当 primary_model 缺少 api_key 时，
-      get_effective_primary_model() 会回退读取 providers 以确保已保存的 API key 不丢失。
+    这是 AI 子系统的根设置节点，包含新版统一主模型配置（AIPrimaryModelSettings）。
+    providers 和 currentProvider 是早期版本的配置格式，已废弃但保留字段
+    以避免旧版 settings.json 解析失败。新版前端代码直接读写 primary_model。
     """
 
     primary_model: AIPrimaryModelSettings = Field(default_factory=AIPrimaryModelSettings)
 
-    # 向后兼容：保留 providers/currentProvider（前端设置页面使用）
-    # providers 格式示例: { "openai": { "provider": "openai", "model": "gpt-4", "apiKey": "sk-...", "baseUrl": "..." } }
+    # 已废弃：旧版 providers/currentProvider 字段，保留仅用于兼容旧版 settings.json
+    # 前端不再写入，也不再读取。新版统一使用 primary_model。
     providers: Optional[Dict[str, Any]] = None
     currentProvider: Optional[str] = None
-
-    def get_effective_primary_model(self) -> AIPrimaryModelSettings:
-        """获取有效的 primary_model：如果 primary_model 缺少 api_key，
-        尝试从 providers[currentProvider] 中补充
-
-        这是一个兼容性方法，确保从旧版设置格式迁移的用户不会丢失 API 密钥。
-        返回的 AIPrimaryModelSettings 对象始终保证 provider 和 model 字段非空。
-        """
-        pm = self.primary_model
-        if pm.api_key:
-            return pm
-
-        # 尝试从旧版 providers 字典中读取对应 provider 的配置
-        if self.providers and self.currentProvider:
-            provider_cfg = self.providers.get(self.currentProvider, {})
-            if isinstance(provider_cfg, dict):
-                return AIPrimaryModelSettings(
-                    provider=provider_cfg.get("provider", pm.provider)
-                    or pm.provider,
-                    model=provider_cfg.get("model", pm.model) or pm.model,
-                    api_key=provider_cfg.get("apiKey") or provider_cfg.get("api_key"),
-                    base_url=provider_cfg.get("baseUrl") or provider_cfg.get("base_url"),
-                )
-        return pm
-
-
-class AgentModelSettings(BaseModel):
-    """Agent 模型配置 — 单个 Agent 角色的 LLM 模型参数
-
-    Agent 系统中不同角色（路由、规划、分析、判定、执行、摘要）各自持有一个
-    AgentModelSettings 实例，允许为每个角色精确控制模型行为和资源消耗。
-
-    字段:
-        provider       — 模型提供商标识
-        model_name     — 模型名称
-        api_key        — API 密钥
-        base_url       — API 端点地址，默认 OpenAI
-        temperature    — 生成温度（0-2），越高越随机，默认 0.7
-        max_tokens     — 单次调用最大生成 token 数，默认 4096
-        timeout        — API 调用超时（秒），默认 60
-        fallback_model — 备选模型名称，主模型不可用时回退到此模型
-    """
-
-    provider: str = "openai"
-    model_name: str = "gpt-4"
-    api_key: Optional[str] = None
-    base_url: str = "https://api.openai.com/v1"
-    temperature: float = 0.7
-    max_tokens: int = 4096
-    timeout: int = 60
-    fallback_model: Optional[str] = None
-
-
-class AgentPlannerSettings(BaseModel):
-    """Agent Planner 配置 — 控制任务规划器的行为和 LLM 依赖策略
-
-    规划器（Planner）是 Agent 的"大脑"，负责将用户指令分解为可执行的任务步骤。
-    此配置控制规划器是否使用 LLM、是否允许降级回退、以及是否记录调用详情。
-
-    字段:
-        enable_llm_planner   — 是否启用 LLM 驱动的规划器（默认 True）
-        max_skills_per_task  — 每个任务最多使用的技能数，默认 3
-
-        require_llm           — 强制要求 LLM 模式（stric 模式，默认 True）
-                                设为 True 时：无适配器或 LLM 调用失败直接报错，不会回退到规则系统
-                                设为 False 时：允许在 LLM 不可用时尝试规则规划器
-
-        allow_rule_fallback   — 是否允许回退到规则规划器（默认 False）
-                                当 require_llm=True 时此字段无效（因为不允许任何回退）
-                                仅当 require_llm=False 时此字段生效
-
-        llm_observability     — 是否记录 LLM 调用详情到 planner runtime info（默认 True）
-                                用于调试和性能分析，记录每次 LLM 规划的输入/输出/token 消耗
-    """
-
-    enable_llm_planner: bool = True  # 默认启用 LLM planner
-    max_skills_per_task: int = 3
-    
-    # LLM 驱动与可观测性配置
-    require_llm: bool = Field(
-        default=True,  # 默认强制要求 LLM（strict 模式）
-        description="是否强制要求 LLM（无 adapter 或调用失败时直接报错，不回退）",
-    )
-    allow_rule_fallback: bool = Field(
-        default=False,  # 默认不允许回退（strict 模式）
-        description="是否允许回退到规则规划器（require_llm=True 时无效）",
-    )
-    llm_observability: bool = Field(
-        default=True,
-        description="是否记录 LLM 调用详情（planner runtime info）",
-    )
-
-
-class AgentExecutionSafetySettings(BaseModel):
-    """Agent 执行安全策略 — 控制 Agent 执行任务时的安全护栏
-
-    此配置决定 Agent 在面临可能产生副作用的操作时的行为：
-      - 是否仅生成计划而不执行
-      - 是否默认使用 dry-run 模式
-      - 是否需要人工审批
-
-    这些安全策略在 Agent 运行时被强制执行，不可由 LLM 自身绕过。
-
-    字段:
-        dangerous_execution_policy — 危险操作执行策略（默认 "plan_only"）：
-                                       "plan_only"       — 仅生成计划，不执行任何操作
-                                       "allow_approved"  — 经审批后可执行
-        dry_run                   — 默认是否以 dry-run 模式运行（默认 False）
-        auto_approve              — 是否默认自动审批所有操作（默认 False，安全优先）
-    """
-
-    dangerous_execution_policy: str = Field(
-        default="plan_only",
-        description="Dangerous execution policy: plan_only / allow_approved",
-    )
-    dry_run: bool = Field(
-        default=False,
-        description="Default dry-run flag for agent execution.",
-    )
-    auto_approve: bool = Field(
-        default=False,
-        description="Whether approvals are auto-granted by default.",
-    )
-
-
-class AgentSettings(BaseModel):
-    """Agent 设置 — Agent 子系统的根配置节点
-
-    聚合 Agent 所有子配置：功能开关、多模型角色分配、规划器策略、执行安全策略。
-
-    Agent 的多模型架构包含 6 个角色，每个角色可使用不同的模型：
-      - router_model     (路由)  — 将用户请求分发到合适的处理流程，默认 gpt-4
-      - planner_model    (规划)  — 分解任务为可执行步骤，默认 gpt-4
-      - analyst_model    (分析)  — 分析执行结果和上下文，默认 gpt-3.5-turbo
-      - judge_model      (判定)  — 判定任务是否完成、结果是否符合预期，默认 gpt-4
-      - executor_model   (执行)  — 生成具体执行代码/命令，默认 gpt-3.5-turbo
-      - summarizer_model (摘要)  — 汇总多步结果生成最终回复，默认 gpt-3.5-turbo
-
-    字段:
-        enabled              — Agent 功能总开关
-        skills_enabled       — 技能系统开关
-        mcp_enabled          — MCP（模型上下文协议）开关
-        multi_model_enabled  — 多模型模式开关（启用后方可为各角色分配不同模型）
-        planner              — 规划器行为配置（AgentPlannerSettings）
-        execution_safety     — 执行安全策略配置（AgentExecutionSafetySettings）
-        router_model         — 路由角色模型配置
-        planner_model        — 规划角色模型配置
-        analyst_model        — 分析角色模型配置
-        judge_model          — 判定角色模型配置
-        executor_model       — 执行角色模型配置
-        summarizer_model     — 摘要角色模型配置
-
-    向后兼容说明:
-        构造函数中存在旧版字段名兼容逻辑：
-        - planner_model_role → planner_model（旧版字段名映射）
-        - summarizer_model   → analyst_model（旧版语义：summarizer 现在由 analyst 角色承担）
-    """
-
-    enabled: bool = True
-    skills_enabled: bool = True
-    mcp_enabled: bool = False
-    multi_model_enabled: bool = False
-    planner: AgentPlannerSettings = Field(default_factory=AgentPlannerSettings)
-    execution_safety: AgentExecutionSafetySettings = Field(
-        default_factory=AgentExecutionSafetySettings
-    )
-    router_model: AgentModelSettings = Field(
-        default_factory=lambda: AgentModelSettings(model_name="gpt-4")
-    )
-    planner_model: AgentModelSettings = Field(default_factory=AgentModelSettings)
-    analyst_model: AgentModelSettings = Field(
-        default_factory=lambda: AgentModelSettings(model_name="gpt-3.5-turbo")
-    )
-    judge_model: AgentModelSettings = Field(
-        default_factory=lambda: AgentModelSettings(model_name="gpt-4")
-    )
-    executor_model: AgentModelSettings = Field(
-        default_factory=lambda: AgentModelSettings(model_name="gpt-3.5-turbo")
-    )
-    summarizer_model: AgentModelSettings = Field(
-        default_factory=lambda: AgentModelSettings(model_name="gpt-3.5-turbo")
-    )
-
-    def __init__(self, **data):
-        """AgentSettings 构造函数 — 包含旧版字段名向后兼容逻辑
-
-        处理两种情况：
-          1. planner_model_role 旧字段 → 自动赋值给 planner_model
-          2. summarizer_model 被定义但 analyst_model 未定义 → 将 summarizer_model 复制到 analyst_model
-             （早期版本 summarizer 角色独立，后合并到 analyst 角色中）
-        """
-        super().__init__(**data)
-        if getattr(self, "planner_model_role", None) and not getattr(
-            self, "planner_model", None
-        ):
-            self.planner_model = self.planner_model_role
-        if getattr(self, "summarizer_model", None) and not getattr(
-            self, "analyst_model", None
-        ):
-            self.analyst_model = self.summarizer_model
 
 
 class AppSettings(BaseModel):
@@ -404,8 +169,9 @@ class AppSettings(BaseModel):
         ui            — UI 布局设置（UISettings）
         ssh           — SSH 连接设置（SSHSettings）
         ai            — AI 模型设置（AISettings，Optional，旧版用户可能无此字段）
-        agent         — Agent 设置（AgentSettings，默认自动创建）
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     theme: str = "light"
     language: str = "zh-CN"
@@ -420,7 +186,6 @@ class AppSettings(BaseModel):
     ui: UISettings = Field(default_factory=UISettings)
     ssh: SSHSettings = Field(default_factory=SSHSettings)
     ai: Optional[AISettings] = None
-    agent: Optional[AgentSettings] = Field(default_factory=AgentSettings)
 
 
 # ==================== 设置管理 ====================

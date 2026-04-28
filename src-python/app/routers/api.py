@@ -2878,20 +2878,6 @@ def _do_ai_proxy_stream(
     return resp
 
 
-class WebResearchRequest(BaseModel):
-    """
-    联网研究请求体（预留，当前未绑定端点）。
-
-    用于未来的联网搜索功能，允许 AI Agent 调用搜索引擎获取外部信息。
-    """
-    query: str
-    """搜索查询字符串"""
-    top_k: int = Field(default=5, ge=1, le=10)
-    """返回前 K 条结果，范围 1-10，默认 5"""
-    fetch_details: bool = Field(default=True)
-    """是否获取详情页面内容，默认 True"""
-
-
 @router.post("/ai/chat-proxy")
 async def ai_chat_proxy(req: AIProxyRequest):
     """

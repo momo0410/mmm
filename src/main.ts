@@ -35,6 +35,8 @@ import { mountPayloader, unmountPayloader } from './modules/payloader/mountPaylo
 // 创建设置管理器实例
 const settingsManager = new SettingsManager();
 let settingsPageManager: SettingsPageManager | null = null;
+let isInitializingApp = false;
+let hasInitializedApp = false;
 
 async function showSettingsOverlay(): Promise<void> {
   const renderer = (window as any).app?.getStateManager?.()?.getUIRenderer?.();
@@ -225,6 +227,13 @@ import { LogContextMenu } from './modules/ui/logContextMenu';
 // 通知动画样式已移除
 
 async function initializeApp() {
+  if (hasInitializedApp || isInitializingApp) {
+    console.warn('LovelyRes 已初始化或正在初始化，跳过重复启动。');
+    return;
+  }
+
+  isInitializingApp = true;
+
   try {
   console.log('🚀 LovelyRes 启动中...');
 
@@ -268,6 +277,7 @@ async function initializeApp() {
   await app.initialize();
 
   console.log('✅ LovelyRes 启动完成');
+  hasInitializedApp = true;
 
     // 移除加载屏幕
     const loadingScreen = document.getElementById('loading-screen');
@@ -1015,6 +1025,8 @@ async function initializeApp() {
         </div>
       `;
     }
+  } finally {
+    isInitializingApp = false;
   }
 
   // 使用事件委托方式添加SSH终端按钮的点击事件监听器
@@ -1068,7 +1080,6 @@ async function initializeApp() {
 /**
  * DOM加载完成后初始化应用
  */
-document.addEventListener('DOMContentLoaded', initializeApp);
 
 /**
  * 页面卸载时清理资源
