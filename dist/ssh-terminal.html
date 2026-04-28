@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Terminal - Linux Emergency Response Tool</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg-primary);
+            font-family: var(--font-family);
+            overflow: hidden;
+        }
+
+        #app {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 控制按钮样式 */
+        .control-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            -webkit-app-region: no-drag;
+        }
+
+        .control-button:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .control-button.minimize-btn:hover {
+            background: #f39c12;
+            color: white;
+        }
+
+        .control-button.maximize-btn:hover {
+            background: #27ae60;
+            color: white;
+        }
+
+        .control-button.close-btn:hover {
+            background: #e74c3c;
+            color: white;
+        }
+
+        /* 调整命令建议面板位置到右侧 */
+        .command-suggestions-panel {
+            left: auto !important;
+            right: 20px !important;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateY(-50%) translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(-50%) translateX(0);
+            }
+        }
+
+        .command-suggestions-panel {
+            animation: slideInRight 0.2s ease-out !important;
+        }
+    </style>
+  <script type="module" crossorigin src="./assets/ssh-terminal-D6jE0KaY.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/vendor-modules-DTVvZM6B.js">
+  <link rel="modulepreload" crossorigin href="./assets/base-KrLRDQMJ.js">
+  <link rel="stylesheet" crossorigin href="./assets/style-BQnl5eIS.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 自定义标题栏（仅在非 macOS 上显示） -->
+        <div class="modern-title-bar" data-tauri-drag-region id="custom-title-bar">
+            <div class="title-bar-left">
+                <div class="app-logo">
+                    <div class="logo-icon" style="width: 24px; height: 24px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                        <img src="./logo.png" alt="LERT Logo">
+                    </div>
+                    <div class="app-info">
+                        <div class="app-name" style="font-size: 14px;">SSH Terminal</div>
+                        <div style="font-size: 9px; color: var(--text-secondary);">Linux Emergency Response Tool</div>
+                    </div>
+                </div>
+            </div>
+            <div class="title-bar-right" id="window-controls-container">
+                <!-- 窗口控制按钮将通过 JavaScript 动态添加（非 macOS） -->
+            </div>
+        </div>
+
+        <!-- SSH终端内容 -->
+        <div id="ssh-terminal-content"></div>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Terminal - Linux Emergency Response Tool</title>
+    <link rel="stylesheet" href="/src/css/base.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg-primary);
+            font-family: var(--font-family);
+            overflow: hidden;
+        }
+
+        #app {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 控制按钮样式 */
+        .control-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            -webkit-app-region: no-drag;
+        }
+
+        .control-button:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .control-button.minimize-btn:hover {
+            background: #f39c12;
+            color: white;
+        }
+
+        .control-button.maximize-btn:hover {
+            background: #27ae60;
+            color: white;
+        }
+
+        .control-button.close-btn:hover {
+            background: #e74c3c;
+            color: white;
+        }
+
+        /* 调整命令建议面板位置到右侧 */
+        .command-suggestions-panel {
+            left: auto !important;
+            right: 20px !important;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateY(-50%) translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(-50%) translateX(0);
+            }
+        }
+
+        .command-suggestions-panel {
+            animation: slideInRight 0.2s ease-out !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 自定义标题栏（仅在非 macOS 上显示） -->
+        <div class="modern-title-bar" data-tauri-drag-region id="custom-title-bar">
+            <div class="title-bar-left">
+                <div class="app-logo">
+                    <div class="logo-icon" style="width: 24px; height: 24px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                        <img src="/logo.png" alt="LERT Logo">
+                    </div>
+                    <div class="app-info">
+                        <div class="app-name" style="font-size: 14px;">SSH Terminal</div>
+                        <div style="font-size: 9px; color: var(--text-secondary);">Linux Emergency Response Tool</div>
+                    </div>
+                </div>
+            </div>
+            <div class="title-bar-right" id="window-controls-container">
+                <!-- 窗口控制按钮将通过 JavaScript 动态添加（非 macOS） -->
+            </div>
+        </div>
+
+        <!-- SSH终端内容 -->
+        <div id="ssh-terminal-content"></div>
+    </div>
+
+    <script type="module">
+        import { createApp } from 'vue';
+        import { invoke } from '/src/shims/@tauri-apps/api/core.ts';
+        import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+        import { listen } from '/src/shims/@tauri-apps/api/event.ts';
+        import { install } from '@icon-park/vue-next/es/all';
+        import '@icon-park/vue-next/styles/index.css';
+        import 'xterm/css/xterm.css';
+        import SSHTerminal from '/src/components/SSHTerminal.vue';
+
+        // 检测是否为 macOS
+        const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
+        // 根据平台调整界面
+        const customTitleBar = document.getElementById('custom-title-bar');
+        const terminalContent = document.getElementById('ssh-terminal-content');
+
+        if (isMacOS) {
+            // macOS: 隐藏自定义标题栏，使用原生标题栏
+            if (customTitleBar) {
+                customTitleBar.style.display = 'none';
+            }
+            if (terminalContent) {
+                terminalContent.style.height = '100vh';
+            }
+        } else {
+            // 其他平台: 显示自定义标题栏和窗口控制按钮
+            if (terminalContent) {
+                terminalContent.style.height = 'calc(100vh - 45px)';
+            }
+
+            const container = document.getElementById('window-controls-container');
+            if (container) {
+                container.innerHTML = `
+                    <button class="control-button minimize-btn" onclick="minimizeWindow()" title="最小化">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                            <rect x="2" y="5.5" width="8" height="1"/>
+                        </svg>
+                    </button>
+                    <button class="control-button maximize-btn" onclick="toggleMaximize()" title="最大化">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                            <rect x="2" y="2" width="8" height="8" stroke="currentColor" stroke-width="1" fill="none"/>
+                        </svg>
+                    </button>
+                    <button class="control-button close-btn close" onclick="closeWindow()" title="关闭">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                            <path d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                `;
+            }
+        }
+
+        // 窗口控制函数
+        window.minimizeWindow = async () => {
+            try {
+                const window = getCurrentWebviewWindow();
+                await window.minimize();
+            } catch (error) {
+                console.error('最小化窗口失败:', error);
+            }
+        };
+
+        window.toggleMaximize = async () => {
+            try {
+                const window = getCurrentWebviewWindow();
+                await window.toggleMaximize();
+            } catch (error) {
+                console.error('切换最大化状态失败:', error);
+            }
+        };
+
+        window.closeWindow = async () => {
+            try {
+                // 清理所有SSH会话
+                await cleanupSSHSessions();
+
+                const window = getCurrentWebviewWindow();
+                await window.destroy();
+            } catch (error) {
+                console.error('关闭窗口失败:', error);
+            }
+        };
+
+        // 清理SSH会话
+        async function cleanupSSHSessions() {
+            try {
+                // 使用新的全局清理命令，一次性关闭所有终端会话
+                const count = await invoke('ssh_close_all_terminal_sessions');
+                console.log(`✅ 已清理所有SSH会话，共 ${count} 个`);
+            } catch (error) {
+                console.error('❌ 清理SSH会话时出错:', error);
+
+                // 如果全局清理失败，尝试逐个清理（后备方案）
+                try {
+                    const terminals = document.querySelectorAll('[data-terminal-id]');
+                    for (const terminal of terminals) {
+                        const terminalId = terminal.getAttribute('data-terminal-id');
+                        if (terminalId) {
+                            try {
+                                await invoke('ssh_close_terminal_session', { terminalId });
+                                console.log('✅ 已清理SSH会话:', terminalId);
+                            } catch (error) {
+                                console.warn('⚠️ 清理SSH会话失败:', terminalId, error);
+                            }
+                        }
+                    }
+                } catch (fallbackError) {
+                    console.error('❌ 后备清理方案也失败:', fallbackError);
+                }
+            }
+        }
+
+        // 监听窗口关闭事件
+        window.addEventListener('beforeunload', async (event) => {
+            await cleanupSSHSessions();
+        });
+
+        // 主题管理
+        async function initializeTheme() {
+            try {
+                // 获取当前主题
+                const themeSettings = await invoke('get_theme_settings');
+                const currentTheme = themeSettings.current_theme || 'sakura';
+
+                // 应用主题
+                applyTheme(currentTheme);
+
+                // 监听主题变更事件
+                await listen('theme-changed', (event) => {
+                    console.log('🎨 收到主题变更事件:', event.payload);
+                    applyTheme(event.payload);
+                });
+
+                console.log('✅ 主题初始化完成:', currentTheme);
+            } catch (error) {
+                console.error('❌ 主题初始化失败:', error);
+                // 使用默认主题
+                applyTheme('sakura');
+            }
+        }
+
+        function applyTheme(theme) {
+            const body = document.body;
+            const html = document.documentElement;
+
+            // 设置data-theme属性
+            body.setAttribute('data-theme', theme);
+            html.setAttribute('data-theme', theme);
+
+            // 更新body类名
+            body.classList.remove('light-theme', 'dark-theme', 'sakura-theme');
+            body.classList.add(`${theme}-theme`);
+
+            // 动态加载主题CSS文件
+            loadThemeCSS(theme);
+        }
+
+        function loadThemeCSS(theme) {
+            // 移除旧的主题CSS
+            const existingThemeLink = document.querySelector('link[data-theme-css]');
+            if (existingThemeLink) {
+                existingThemeLink.remove();
+            }
+
+            // 加载新的主题CSS
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = `/src/css/themes/${theme}.css`;
+            link.setAttribute('data-theme-css', 'true');
+            document.head.appendChild(link);
+        }
+
+        // 初始化字体设置
+        async function initializeFontSettings() {
+            try {
+                console.log('🔤 初始化SSH终端字体设置...');
+
+                // 读取设置文件
+                const settingsContent = await invoke('read_settings_file');
+                if (settingsContent) {
+                    const settings = JSON.parse(settingsContent);
+
+                    // 应用全局字体设置
+                    if (settings.ui && settings.ui.globalFont && settings.ui.globalFont !== 'system') {
+                        let fontFamily = settings.ui.globalFont;
+
+                        // 如果字体名称不包含引号，自动添加
+                        if (!fontFamily.includes("'") && !fontFamily.includes('"')) {
+                            fontFamily = `'${fontFamily}', sans-serif`;
+                        }
+
+                        document.documentElement.style.setProperty('--font-family', fontFamily);
+                        console.log('✅ SSH终端已应用全局字体:', fontFamily);
+                    } else {
+                        console.log('📝 SSH终端使用系统默认字体');
+                    }
+                } else {
+                    console.log('📝 未找到设置文件，SSH终端使用默认字体');
+                }
+            } catch (error) {
+                console.error('❌ SSH终端字体设置初始化失败:', error);
+            }
+        }
+
+        // 创建Vue应用，直接使用SSHTerminal组件作为根组件
+        const app = createApp(SSHTerminal);
+
+        // 安装IconPark图标库
+        install(app, 'icon'); // 使用 'icon' 前缀，例如 icon-add-one
+
+        // 挂载应用到SSH终端内容区域
+        app.mount('#ssh-terminal-content');
+
+        // 初始化主题
+        initializeTheme();
+
+        // 初始化字体设置
+        initializeFontSettings();
+
+        console.log('✅ SSH终端窗口已初始化');
+    </script>
+</body>
+</html>
