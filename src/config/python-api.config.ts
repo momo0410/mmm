@@ -436,6 +436,97 @@ class PythonApi {
     return this.request('POST', '/log/file-info', undefined, { log_path: logPath });
   }
 
+  // ==================== 渗透测试 Agent ====================
+
+  async pentestStart(params: {
+    target: string;
+    max_rounds?: number;
+    dry_run?: boolean;
+    api_key: string;
+    model: string;
+    base_url: string;
+    provider: string;
+    temperature?: number;
+  }) {
+    return this.request<{success: boolean; message: string; target: string; task_id: string}>('POST', '/agent/pentest/start', {
+      target: params.target,
+      max_rounds: params.max_rounds ?? 30,
+      dry_run: params.dry_run ?? false,
+      api_key: params.api_key,
+      model: params.model,
+      base_url: params.base_url,
+      provider: params.provider,
+      temperature: params.temperature ?? 0.3,
+    });
+  }
+
+  async pentestStatus(taskId: string) {
+    return this.request<{
+      running: boolean;
+      phase: string;
+      targets: string[];
+      findings_count: number;
+      vuln_count: number;
+      cred_count: number;
+      actions_count: number;
+      actions: Array<{tool: string; args: string; time: string; result: string}>;
+      task_id: string;
+    }>('GET', '/agent/pentest/status', undefined, { task_id: taskId });
+  }
+
+  async pentestStop(taskId: string) {
+    return this.request('POST', '/agent/pentest/stop', undefined, { task_id: taskId });
+  }
+
+  async pentestGetState(taskId: string) {
+    return this.request('GET', '/agent/state', undefined, { task_id: taskId });
+  }
+
+  async pentestGetReport(taskId: string) {
+    return this.request<{report: string; phase: string; task_id: string}>('GET', '/agent/report', undefined, { task_id: taskId });
+  }
+
+  async pentestLogs(taskId: string) {
+    return this.request<{
+      phase: string;
+      actions_count: number;
+      actions: Array<{
+        id?: string;
+        tool: string;
+        args: string;
+        time: string;
+        result: string;
+        full_stdout: string;
+        llm_decision: string;
+        returncode: number | null;
+        error: string;
+        status?: string;
+        updated_at?: string;
+      }>;
+      task_id: string;
+    }>('GET', '/agent/pentest/logs', undefined, { task_id: taskId });
+  }
+
+  async pentestHistory() {
+    return this.request<{
+      history: Array<{
+        task_id: string;
+        target: string;
+        start_time: string;
+        status: string;
+        phase: string;
+        findings_count: number;
+        vuln_count: number;
+        actions_count: number;
+      }>;
+      total: number;
+    }>('GET', '/agent/history');
+  }
+
+  async pentestDeleteHistory(taskId: string) {
+    return this.request('DELETE', `/agent/history/${taskId}`);
+  }
+
   // ==================== 加密 & 设备信息 ====================
 
   async getRsaPublicKey() {

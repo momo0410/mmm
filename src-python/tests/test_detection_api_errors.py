@@ -1,8 +1,5 @@
 from fastapi.testclient import TestClient
-
 from app.main import app
-
-
 def test_detection_endpoints_return_400_without_ssh_connection() -> None:
     endpoints = [
         "/api/v1/detect/port-scan",
@@ -31,14 +28,12 @@ def test_detection_endpoints_return_400_without_ssh_connection() -> None:
         "/api/v1/detect/disk-test",
         "/api/v1/detect/network-test",
     ]
-
     with TestClient(app, raise_server_exceptions=False) as client:
         for endpoint in endpoints:
             response = client.post(endpoint)
             assert response.status_code == 400, (
                 f"{endpoint} returned {response.status_code}: {response.text}"
             )
-
             payload = response.json()
             assert isinstance(payload, dict)
             assert payload.get("detail")

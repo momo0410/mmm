@@ -1,82 +1,3 @@
-"""
-加密密钥模块：RSA 公钥的混淆存储与解析
-===========================================
-
-[模块用途]
-本模块提供一个硬编码的 RSA 公钥（2048 位），用于前端加密敏感数据后发送给后端。
-公钥以 XOR 混淆后的字节形式存储（而非明文 Base64 字符串），增加了从二进制/源码中
-直接提取密钥的难度。该模块对应 Rust 版本 src/crypto/crypto_keys.rs 的逻辑迁移。
-
-[为什么需要 XOR 混淆？]
-RSA 公钥本身按密码学定义是「公开」的，任何人拿到它都能加密数据。但在本系统中，
-公钥被硬编码在代码中（不经过配置文件），如果以明文 Base64 形式直接写在源码中，
-攻击者通过简单的 strings 命令或静态分析就能立刻定位并提取公钥，进而构建中间人攻击：
-  1. 替换编译产物中的公钥为自己的公钥
-  2. 拦截前端加密流量
-  3. 用攻击者的私钥解密用户密码等敏感数据
-
-XOR 混淆虽然不提供真正的密码学安全（因为密钥 0x5A 同时在代码中），但足够让
-简单的字符串搜索和自动化扫描工具失效。这属于纵深防御（defense-in-depth）措施，
-为逆向工程增加了一道门槛。
-
-[使用场景 —— 前端用此公钥加密敏感数据]
-前端在以下场景调用 GET /api/v1/crypto/rsa-public-key 获取本模块的公钥：
-  1. 登录/注册 — 用公钥加密用户名和密码，再将密文发送给后端
-  2. AI API Key 配置 — 在本地加密存储第三方 API 密钥
-  3. 敏感参数通信 — 前端与后端之间传输敏感数据时使用公钥加密
-
-后端的对应 RSA 私钥在应用首次启动时自动生成并持久化存储，用于解密前端发来的密文。
-公私钥分离：公钥嵌入代码（可暴露），私钥仅在运行时生成且保存在磁盘（不可提取）。
-
-[API 端点]
-本模块的唯一公开函数 get_rsa_public_key() 由以下端点调用：
-
-  app/routers/api.py → 第 3016 行:
-    @router.get("/crypto/rsa-public-key")
-    async def get_rsa_key():
-        return {"public_key": get_rsa_public_key()}
-
-端点返回 JSON 格式: {"public_key": "-----BEGIN PUBLIC KEY-----\n..."}
-该端点在应用启动时由前端调用，用于建立安全通信通道。
-
-[数据格式概览]
-  混淆前：Base64 编码的 DER 格式 RSA 公钥（即 X.509 SubjectPublicKeyInfo 的
-          Base64 表示，不含 PEM 头尾标记和换行符）
-  混淆后：每个字节与 0x5A 做 XOR 运算的结果，以 bytes 数组形式存储在代码中
-  返回前：解除混淆 → 每 64 字符插入换行 → 包裹 PEM 头尾标记
-"""
-
-# ============================================================================
-# XOR 混淆的公钥数据
-# ============================================================================
-# === XOR 混淆算法 ===
-#   加密: original_byte XOR XOR_KEY = obfuscated_byte
-#   解密: obfuscated_byte XOR XOR_KEY = original_byte
-# XOR 具有对称性（A ^ K ^ K = A），因此加密和解密使用完全相同的运算。
-#
-# === 为什么选择 XOR 作为混淆算法？ ===
-#   - 实现极简：只需一行代码即可完成加密/解密
-#   - 可逆性好：加密和解密使用完全相同的代码路径
-#   - 每个字节独立处理：不需要分组、填充或初始化向量
-#   - 运算速度快：单条 CPU 指令即可完成
-#
-# === 为什么选择 0x5A 作为 XOR 密钥？ ===
-#   0x5A (二进制 01011010) 的 8 个二进制位中恰好有 4 个 1 和 4 个 0，分布均匀。
-#   XOR 后每个字节的变化较为随机，不会出现大段连续的相同字节模式。
-#   0x5A 即 ASCII 字符 'Z'，但此处仅作为字节值使用，无 ASCII 含义。
-#   该值与 Rust 版本 src/crypto/crypto_keys.rs 保持同步。
-#
-# === 混淆流程示例 ===
-#   假设原始 DER 公钥经过 Base64 编码后的第一个字符为 'M' (0x4D):
-#     Base64 字节 0x4D ^ XOR_KEY (0x5A) → 0x17
-#     因此 OBFUSCATED_PUBLIC_KEY 的第一个字节为 0x17
-#   解混淆时:
-#     0x17 ^ 0x5A → 0x4D ('M')  ← 成功还原
-# ============================================================================
-
-# 混淆后的公钥字节数组。
-# 每个字节 = 原始 Base64 公钥字符串的对应字节 XOR 0x5A
-# 数组共 384 字节，对应 2048 位 RSA 公钥的 DER → Base64 编码结果。
 OBFUSCATED_PUBLIC_KEY = bytes([
     0x17, 0x13, 0x13, 0x18, 0x13, 0x30, 0x1b, 0x14, 0x18, 0x3d, 0x31, 0x2b, 0x32, 0x31, 0x33, 0x1d,
     0x63, 0x2d, 0x6a, 0x18, 0x1b, 0x0b, 0x1f, 0x1c, 0x1b, 0x1b, 0x15, 0x19, 0x1b, 0x0b, 0x62, 0x1b,
@@ -104,86 +25,12 @@ OBFUSCATED_PUBLIC_KEY = bytes([
     0x37, 0x29, 0x63, 0x3b, 0x33, 0x75, 0x10, 0x02, 0x2c, 0x2f, 0x2e, 0x13, 0x08, 0x6c, 0x0b, 0x36,
     0x30, 0x0b, 0x13, 0x1e, 0x1b, 0x0b, 0x1b, 0x18,
 ])
-
-# XOR 混淆密钥。
-# 混淆后的每个字节与此值做异或运算即可还原为原始字节。
-# 选择 0x5A 的原因：该值的二进制表示中各有一半是 0 和 1，
-# 混淆后的字节模式较为均匀，不易被模式识别工具发现。
 XOR_KEY = 0x5A
-
-
 def get_rsa_public_key() -> str:
-    """
-    解混淆并返回 RSA 公钥的标准 PEM 格式字符串。
-
-    [调用方] app/routers/api.py → GET /api/v1/crypto/rsa-public-key
-    前端请求该端点时，api.py 调用此函数获取 PEM 公钥并返回 JSON。
-
-    [处理流程 —— 4 个步骤还原公钥]
-
-    第 1 步 — XOR 解混淆
-        对 OBFUSCATED_PUBLIC_KEY 的每个字节与 XOR_KEY (0x5A) 做异或运算。
-        由于 XOR 的对称性质（A ^ K ^ K = A），混淆过的字节再次异或同一密钥
-        即可还原为原始字节。使用生成器表达式 + bytes() 构造器完成。
-
-    第 2 步 — 解码为 UTF-8 字符串
-        将还原后的字节数组按 UTF-8 解码为 Python 字符串。
-        此字符串是纯 Base64 编码的 DER 格式 RSA 公钥，不含 PEM 头尾和换行符。
-        
-        格式示例:
-          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
-
-    第 3 步 — PEM 格式化（每行 64 字符换行）
-        按照 PEM 标准（RFC 7468），Base64 正文每行不得超过 64 个字符。
-        从索引 0 开始，步长为 64，每次取 [i:i+64] 的切片放入列表，
-        最后用换行符 \n 连接所有行。
-        
-        输入: MIIBIjANBgkq...（一整行连续文本）
-        输出: MIIBIjANBgkq...\n<下一行>...（每行最多 64 字符）
-
-    第 4 步 — 包裹 PEM 头尾标记
-        在格式化后的 Base64 正文前后分别添加标头标尾:
-        
-          -----BEGIN PUBLIC KEY-----
-          <分行后的 Base64 正文>
-          -----END PUBLIC KEY-----
-
-    [返回值]
-    标准 PEM 格式的 2048 位 RSA 公钥字符串，可直接用于：
-      - 前端 Web Crypto API: crypto.subtle.importKey("spki", ...)
-      - Python cryptography 库: serialization.load_pem_public_key()
-      - OpenSSL: openssl rsa -pubin -text -in <file>
-      - Java KeyFactory、Node.js crypto 等所有支持 PEM 格式的工具
-
-    [使用示例]
-        >>> key = get_rsa_public_key()
-        >>> print(key[:28])
-        -----BEGIN PUBLIC KEY-----
-        >>> print(key[-26:])
-        -----END PUBLIC KEY-----
-    """
-    # ── 第 1 步：XOR 解混淆 ──
-    # 遍历 OBFUSCATED_PUBLIC_KEY 的每个字节 b，计算 b ^ XOR_KEY 得到原始字节。
-    # bytes() 构造器接收可迭代对象，将生成器表达式的结果收集为新的 bytes 对象。
     deobfuscated = bytes(b ^ XOR_KEY for b in OBFUSCATED_PUBLIC_KEY)
-
-    # ── 第 2 步：解码为 UTF-8 字符串 ──
-    # 还原后的字节数组是 DER 格式 RSA 公钥的 Base64 编码文本。
-    # Base64 字符集是 ASCII 的子集，因此 UTF-8 解码安全且正确。
     base64_key = deobfuscated.decode('utf-8')
-
-    # ── 第 3 步：PEM 格式化（每行 64 字符） ──
-    # 按照 PEM 标准 (RFC 7468 Section 3) 对 Base64 正文进行分行处理。
-    # range(0, len(base64_key), 64) 生成 0, 64, 128, ... 的索引序列，
-    # 每次切片取出最多 64 个字符，收集到 formatted_lines 列表中。
     formatted_lines = []
     for i in range(0, len(base64_key), 64):
         formatted_lines.append(base64_key[i:i + 64])
-
-    # 用换行符连接所有行，得到符合 PEM 标准的多行 Base64 正文。
     formatted_key = '\n'.join(formatted_lines)
-
-    # ── 第 4 步：包裹 PEM 头尾标记 ──
-    # 在分行后的 Base64 正文前后添加 PEM 头尾，
-    # 得到完整的、符合 RFC 7468 标准的 PEM 格式公钥输出。
     return f"-----BEGIN PUBLIC KEY-----\n{formatted_key}\n-----END PUBLIC KEY-----"

@@ -3,7 +3,7 @@
  * 负责独立 AI 配置菜单的交互逻辑和表单同步
  */
 
-import { SettingsManager } from './settingsManager';
+import { SettingsManager, type AIProviderSettings, type AISettings } from './settingsManager';
 import { aiService, AIProvider } from '../ai/aiService';
 
 type ProxyType = 'http' | 'https' | 'socks5';
@@ -11,6 +11,7 @@ type ProxyType = 'http' | 'https' | 'socks5';
 export class SettingsPageManager {
   private settingsManager: SettingsManager;
   private readonly presetProviders = ['openai', 'deepseek', 'claude', 'qwen', 'ollama', 'custom'];
+  private activeProviderKey = 'openai';
 
   constructor(settingsManager: SettingsManager) {
     this.settingsManager = settingsManager;
@@ -36,6 +37,19 @@ export class SettingsPageManager {
     const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement | null;
     aiProviderSelect?.addEventListener('change', () => {
       this.switchAIProvider();
+    });
+
+    const configuredModelsList = document.getElementById('configured-models-list');
+    configuredModelsList?.addEventListener('click', (event) => {
+      const switchButton = (event.target as HTMLElement | null)?.closest('[data-provider-switch]');
+      if (!switchButton) {
+        return;
+      }
+
+      const providerKey = switchButton.getAttribute('data-provider-switch');
+      if (providerKey) {
+        this.selectProvider(providerKey);
+      }
     });
 
     const useProxyCheckbox = document.getElementById('ai-use-proxy') as HTMLInputElement | null;
@@ -78,22 +92,18 @@ export class SettingsPageManager {
 
   private loadSettingsToForm(): void {
     const settings = this.settingsManager.getSettings();
-
-    if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
-    }
-    if (!settings.ai.providers) {
-      settings.ai.providers = {};
-    }
+    const aiSettings = this.ensureAISettings(settings);
 
     this.updateProviderSelector();
 
     const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement | null;
-    if (aiProviderSelect && settings.ai.currentProvider) {
-      aiProviderSelect.value = settings.ai.currentProvider;
+    if (aiProviderSelect && aiSettings.currentProvider) {
+      aiProviderSelect.value = aiSettings.currentProvider;
     }
 
+    this.activeProviderKey = aiSettings.currentProvider || 'openai';
     this.loadCurrentProviderConfig();
+    this.renderConfiguredModels();
     this.updateDeleteButtonVisibility();
   }
 
@@ -102,6 +112,7 @@ export class SettingsPageManager {
 
     try {
       console.log('💾 正在保存 AI 配置...');
+      this.persistCurrentFormToSettings();
 
       if (saveButton) {
         saveButton.disabled = true;
@@ -168,6 +179,8 @@ export class SettingsPageManager {
       settingsObj.ai.primary_model.api_key = config.apiKey;
       if (config.baseUrl) {
         settingsObj.ai.primary_model.base_url = config.baseUrl;
+      } else {
+        delete settingsObj.ai.primary_model.base_url;
       }
 
       if (!settingsObj.agent) settingsObj.agent = {};
@@ -178,6 +191,8 @@ export class SettingsPageManager {
       settingsObj.agent.planner_model.api_key = config.apiKey;
       if (config.baseUrl) {
         settingsObj.agent.planner_model.base_url = config.baseUrl;
+      } else {
+        delete settingsObj.agent.planner_model.base_url;
       }
 
       await fetch(`${baseUrl}/settings/save`, {
@@ -203,15 +218,9 @@ export class SettingsPageManager {
 
     const currentProvider = aiProviderSelect?.value || 'openai';
     const settings = this.settingsManager.getSettings();
+    const aiSettings = this.ensureAISettings(settings);
 
-    if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
-    }
-    if (!settings.ai.providers) {
-      settings.ai.providers = {};
-    }
-
-    const updatedProviders = { ...settings.ai.providers };
+    const updatedProviders = { ...aiSettings.providers };
     if (updatedProviders[currentProvider]) {
       updatedProviders[currentProvider] = {
         ...updatedProviders[currentProvider],
@@ -233,27 +242,24 @@ export class SettingsPageManager {
   }
 
   private switchAIProvider(): void {
-    this.loadCurrentProviderConfig();
-    this.updateDeleteButtonVisibility();
+    const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement | null;
+    const nextProvider = aiProviderSelect?.value || 'openai';
+    this.selectProvider(nextProvider);
   }
 
   private loadCurrentProviderConfig(): void {
     const settings = this.settingsManager.getSettings();
-
-    if (!settings.ai) {
-      settings.ai = { providers: {}, currentProvider: 'openai' };
-    }
-    if (!settings.ai.providers) {
-      settings.ai.providers = {};
-    }
+    const aiSettings = this.ensureAISettings(settings);
 
     const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement | null;
-    const currentProvider = aiProviderSelect?.value || settings.ai.currentProvider;
-    const providerConfig = settings.ai.providers[currentProvider];
+    const currentProvider = aiProviderSelect?.value || aiSettings.currentProvider;
+    const providerConfig = aiSettings.providers[currentProvider];
 
     if (!providerConfig) {
       return;
     }
+
+    this.activeProviderKey = currentProvider;
 
     const apiKeyInput = document.getElementById('ai-api-key') as HTMLInputElement | null;
     const modelInput = document.getElementById('ai-model') as HTMLInputElement | null;
@@ -463,29 +469,344 @@ export class SettingsPageManager {
 
     const currentValue = aiProviderSelect.value;
     aiProviderSelect.innerHTML = '';
+    const aiSettings = this.ensureAISettings(settings);
 
-    if (!settings.ai) {
-      settings.ai = { currentProvider: '', providers: {} };
-    }
-    if (!settings.ai.providers) {
-      settings.ai.providers = {};
-    }
-    if (!settings.ai.currentProvider) {
-      settings.ai.currentProvider = '';
-    }
-
-    Object.entries(settings.ai.providers).forEach(([key, provider]) => {
+    Object.entries(aiSettings.providers).forEach(([key, provider]) => {
       const option = document.createElement('option');
       option.value = key;
       option.textContent = provider.name;
       aiProviderSelect.appendChild(option);
     });
 
-    if (currentValue && settings.ai.providers[currentValue]) {
+    if (currentValue && aiSettings.providers[currentValue]) {
       aiProviderSelect.value = currentValue;
     } else {
-      aiProviderSelect.value = settings.ai.currentProvider;
+      aiProviderSelect.value = aiSettings.currentProvider;
     }
+  }
+
+  private ensureAISettings(settings: { ai?: AISettings }): AISettings {
+    if (!settings.ai) {
+      settings.ai = { currentProvider: 'openai', providers: {} };
+    }
+
+    if (!settings.ai.providers) {
+      settings.ai.providers = {};
+    }
+
+    if (!settings.ai.currentProvider) {
+      settings.ai.currentProvider = 'openai';
+    }
+
+    return settings.ai;
+  }
+
+  private selectProvider(providerKey: string): void {
+    const settings = this.settingsManager.getSettings();
+    const aiSettings = this.ensureAISettings(settings);
+
+    if (!aiSettings.providers[providerKey]) {
+      return;
+    }
+
+    this.persistCurrentFormToSettings();
+
+    aiSettings.currentProvider = providerKey;
+    this.syncPrimaryModelSelection(aiSettings, providerKey);
+    this.settingsManager.updateSettings({ ai: aiSettings });
+
+    const aiProviderSelect = document.getElementById('ai-provider') as HTMLSelectElement | null;
+    if (aiProviderSelect) {
+      aiProviderSelect.value = providerKey;
+    }
+
+    this.activeProviderKey = providerKey;
+    this.loadCurrentProviderConfig();
+    this.renderConfiguredModels();
+    this.updateDeleteButtonVisibility();
+  }
+
+  private persistCurrentFormToSettings(): void {
+    const settings = this.settingsManager.getSettings();
+    const aiSettings = this.ensureAISettings(settings);
+    const providerKey = this.activeProviderKey || aiSettings.currentProvider;
+
+    if (!providerKey || !aiSettings.providers[providerKey]) {
+      return;
+    }
+
+    const apiKeyInput = document.getElementById('ai-api-key') as HTMLInputElement | null;
+    const modelInput = document.getElementById('ai-model') as HTMLInputElement | null;
+    const baseUrlInput = document.getElementById('ai-base-url') as HTMLInputElement | null;
+    const useProxyCheckbox = document.getElementById('ai-use-proxy') as HTMLInputElement | null;
+    const proxyTypeSelect = document.getElementById('ai-proxy-type') as HTMLSelectElement | null;
+    const proxyUrlInput = document.getElementById('ai-proxy-url') as HTMLInputElement | null;
+
+    aiSettings.providers[providerKey] = {
+      ...aiSettings.providers[providerKey],
+      apiKey: apiKeyInput?.value || '',
+      model: modelInput?.value || '',
+      baseUrl: baseUrlInput?.value || '',
+      useProxy: useProxyCheckbox?.checked || false,
+      proxyType: (proxyTypeSelect?.value as ProxyType) || 'http',
+      proxyUrl: proxyUrlInput?.value || '',
+    };
+
+    aiSettings.currentProvider = providerKey;
+    this.syncPrimaryModelSelection(aiSettings, providerKey);
+    this.settingsManager.updateSettings({ ai: aiSettings });
+  }
+
+  private renderConfiguredModels(): void {
+    const container = document.getElementById('configured-models-list');
+    const countBadge = document.getElementById('configured-models-count');
+
+    if (!container || !countBadge) {
+      return;
+    }
+
+    const settings = this.settingsManager.getSettings();
+    const aiSettings = this.ensureAISettings(settings);
+    const currentProvider = this.activeProviderKey || aiSettings.currentProvider;
+    const providerEntries = Object.entries(aiSettings.providers)
+      .filter(([key, config]) => this.shouldDisplayProviderCard(key, config, currentProvider))
+      .sort(([leftKey, leftConfig], [rightKey, rightConfig]) => {
+        if (leftKey === currentProvider) {
+          return -1;
+        }
+        if (rightKey === currentProvider) {
+          return 1;
+        }
+        const leftReady = this.isProviderConfigured(leftKey, leftConfig);
+        const rightReady = this.isProviderConfigured(rightKey, rightConfig);
+        if (leftReady !== rightReady) {
+          return leftReady ? -1 : 1;
+        }
+        return leftConfig.name.localeCompare(rightConfig.name, 'zh-CN');
+      });
+
+    countBadge.textContent = `${providerEntries.length} 个`;
+
+    if (providerEntries.length === 0) {
+      container.innerHTML = `
+        <div style="
+          padding: 14px 16px;
+          border: 1px dashed var(--border-color);
+          border-radius: var(--border-radius);
+          background: var(--bg-primary);
+          color: var(--text-secondary);
+          font-size: 13px;
+          line-height: 1.6;
+        ">当前还没有可展示的模型配置。填写下方表单并保存后，这里会自动显示模型详情。</div>
+      `;
+      return;
+    }
+
+    container.innerHTML = providerEntries.map(([key, config]) => {
+      const isCurrent = key === currentProvider;
+      const isConfigured = this.isProviderConfigured(key, config);
+      const readinessStyle = isConfigured
+        ? 'background: rgba(34, 197, 94, 0.14); color: #16a34a;'
+        : 'background: rgba(245, 158, 11, 0.14); color: #d97706;';
+      const currentStyle = isCurrent
+        ? 'background: rgba(59, 130, 246, 0.14); color: #2563eb;'
+        : 'background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-color);';
+      const switchButtonStyle = isCurrent
+        ? 'background: var(--bg-secondary); color: var(--text-secondary); cursor: default;'
+        : 'background: var(--primary-color); color: white; cursor: pointer;';
+
+      return `
+        <div style="
+          border: 1px solid ${isCurrent ? 'rgba(59, 130, 246, 0.35)' : 'var(--border-color)'};
+          border-radius: var(--border-radius-lg);
+          background: var(--bg-primary);
+          padding: 14px 16px;
+          box-shadow: ${isCurrent ? '0 8px 20px rgba(59, 130, 246, 0.08)' : 'none'};
+        ">
+          <div style="
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+          ">
+            <div style="min-width: 0; flex: 1;">
+              <div style="
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 6px;
+                flex-wrap: wrap;
+              ">
+                <strong style="
+                  color: var(--text-primary);
+                  font-size: 14px;
+                ">${this.escapeHtml(config.name)}</strong>
+                <span style="
+                  padding: 2px 8px;
+                  border-radius: 999px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  ${readinessStyle}
+                ">${isConfigured ? '可直接使用' : '待完善'}</span>
+                <span style="
+                  padding: 2px 8px;
+                  border-radius: 999px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  ${currentStyle}
+                ">${isCurrent ? '当前使用' : '备用模型'}</span>
+              </div>
+              <div style="
+                color: var(--text-primary);
+                font-size: 13px;
+                font-weight: 600;
+                word-break: break-all;
+              ">${this.escapeHtml(config.model || '未填写模型名称')}</div>
+            </div>
+            <button
+              type="button"
+              data-provider-switch="${this.escapeHtml(key)}"
+              ${isCurrent ? 'disabled' : ''}
+              style="
+                border: none;
+                border-radius: var(--border-radius);
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: 600;
+                white-space: nowrap;
+                ${switchButtonStyle}
+              "
+            >${isCurrent ? '当前编辑中' : '切换并编辑'}</button>
+          </div>
+
+          <div style="
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px 12px;
+          ">
+            ${this.renderProviderDetail('提供商', config.name)}
+            ${this.renderProviderDetail('Base URL', config.baseUrl || '未填写')}
+            ${this.renderProviderDetail('API Key', this.maskApiKey(config.apiKey))}
+            ${this.renderProviderDetail(
+              '代理',
+              config.useProxy
+                ? `${config.proxyType.toUpperCase()} · ${config.proxyUrl || '未填写代理地址'}`
+                : '未启用'
+            )}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  private renderProviderDetail(label: string, value: string): string {
+    return `
+      <div style="
+        min-width: 0;
+        padding: 10px 12px;
+        border-radius: var(--border-radius);
+        background: var(--bg-secondary);
+      ">
+        <div style="
+          color: var(--text-secondary);
+          font-size: 12px;
+          margin-bottom: 4px;
+        ">${this.escapeHtml(label)}</div>
+        <div style="
+          color: var(--text-primary);
+          font-size: 12px;
+          line-height: 1.5;
+          word-break: break-all;
+        ">${this.escapeHtml(value)}</div>
+      </div>
+    `;
+  }
+
+  private shouldDisplayProviderCard(
+    key: string,
+    config: AIProviderSettings,
+    currentProvider: string
+  ): boolean {
+    return this.hasExplicitProviderConfig(key, config)
+      || (key === currentProvider && this.isProviderConfigured(key, config));
+  }
+
+  private hasExplicitProviderConfig(key: string, config: AIProviderSettings): boolean {
+    const defaultConfig = this.getDefaultProviderConfig(key);
+    const providerType = this.mapProviderKeyToType(key);
+
+    if (providerType === 'ollama') {
+      return Boolean(
+        config.model !== defaultConfig.model
+        || config.baseUrl !== defaultConfig.baseUrl
+        || config.useProxy
+        || config.proxyUrl
+      );
+    }
+
+    return Boolean(config.apiKey.trim());
+  }
+
+  private getDefaultProviderConfig(key: string): Pick<AIProviderSettings, 'model' | 'baseUrl'> {
+    switch (key) {
+      case 'openai':
+        return { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' };
+      case 'deepseek':
+        return { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' };
+      case 'claude':
+        return { model: 'claude-3-5-sonnet-latest', baseUrl: 'https://api.anthropic.com/v1' };
+      case 'qwen':
+        return { model: 'qwen-turbo', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' };
+      case 'ollama':
+        return { model: 'llama3.1', baseUrl: 'http://localhost:11434/api' };
+      default:
+        return { model: '', baseUrl: '' };
+    }
+  }
+
+  private isProviderConfigured(key: string, config: AIProviderSettings): boolean {
+    return Boolean(
+      config.model
+      && config.baseUrl
+      && (this.mapProviderKeyToType(key) === 'ollama' || config.apiKey)
+    );
+  }
+
+  private syncPrimaryModelSelection(aiSettings: AISettings, providerKey: string): void {
+    const providerConfig = aiSettings.providers[providerKey];
+    if (!providerConfig) {
+      return;
+    }
+
+    aiSettings.primary_model = {
+      provider: this.mapProviderKeyToType(providerKey),
+      model: providerConfig.model || '',
+      api_key: providerConfig.apiKey || undefined,
+      base_url: providerConfig.baseUrl || undefined,
+    };
+  }
+
+  private maskApiKey(apiKey: string): string {
+    if (!apiKey) {
+      return '未填写';
+    }
+
+    if (apiKey.length <= 8) {
+      return `${apiKey.slice(0, 2)}***${apiKey.slice(-2)}`;
+    }
+
+    return `${apiKey.slice(0, 4)}••••••${apiKey.slice(-4)}`;
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private showAddProviderModal(): void {
@@ -529,7 +850,8 @@ export class SettingsPageManager {
       }
 
       const settings = this.settingsManager.getSettings();
-      const existingNames = Object.values(settings.ai.providers).map((provider) => provider.name.toLowerCase());
+      const aiSettings = this.ensureAISettings(settings);
+      const existingNames = Object.values(aiSettings.providers).map((provider) => provider.name.toLowerCase());
 
       if (existingNames.includes(name.toLowerCase())) {
         this.showMessage('提供商名称已存在', 'error');
@@ -537,7 +859,7 @@ export class SettingsPageManager {
       }
 
       const key = this.generateProviderKey(name);
-      settings.ai.providers[key] = {
+      aiSettings.providers[key] = {
         name,
         apiKey,
         model,
@@ -546,13 +868,16 @@ export class SettingsPageManager {
         proxyType: 'http',
         proxyUrl: '',
       };
-      settings.ai.currentProvider = key;
+      aiSettings.currentProvider = key;
+      this.syncPrimaryModelSelection(aiSettings, key);
 
-      this.settingsManager.updateSettings(settings);
+      this.settingsManager.updateSettings({ ai: aiSettings });
       await this.settingsManager.saveSettings();
 
       this.updateProviderSelector();
+      this.activeProviderKey = key;
       this.loadCurrentProviderConfig();
+      this.renderConfiguredModels();
       this.updateDeleteButtonVisibility();
       this.hideAddProviderModal();
       (window as any).app?.modernUIRenderer?.syncSettingsDropdownState?.();
@@ -609,20 +934,24 @@ export class SettingsPageManager {
       }
 
       const settings = this.settingsManager.getSettings();
-      const providerName = settings.ai.providers[currentProvider]?.name || currentProvider;
+      const aiSettings = this.ensureAISettings(settings);
+      const providerName = aiSettings.providers[currentProvider]?.name || currentProvider;
 
       if (!confirm(`确定要删除提供商 "${providerName}" 吗？此操作不可撤销。`)) {
         return;
       }
 
-      delete settings.ai.providers[currentProvider];
-      settings.ai.currentProvider = 'openai';
+      delete aiSettings.providers[currentProvider];
+      aiSettings.currentProvider = 'openai';
+      this.syncPrimaryModelSelection(aiSettings, 'openai');
 
-      this.settingsManager.updateSettings(settings);
+      this.settingsManager.updateSettings({ ai: aiSettings });
       await this.settingsManager.saveSettings();
 
       this.updateProviderSelector();
+      this.activeProviderKey = 'openai';
       this.loadCurrentProviderConfig();
+      this.renderConfiguredModels();
       this.updateDeleteButtonVisibility();
       (window as any).app?.modernUIRenderer?.syncSettingsDropdownState?.();
 

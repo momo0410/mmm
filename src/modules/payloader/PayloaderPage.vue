@@ -99,6 +99,31 @@
             @input="setSearchQuery(($event.target as HTMLInputElement).value)"
           />
         </div>
+        <button
+          v-if="state.viewMode === 'list'"
+          class="payloader-btn payloader-btn--history"
+          @click="showHistoryModal = true; loadHistory()"
+          title="渗透历史"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20v-6M6 20V10M18 20V4"></path>
+          </svg>
+          历史
+        </button>
+        <button
+          v-if="state.viewMode === 'list'"
+          class="payloader-btn payloader-btn--pentest"
+          @click="openPentestModal"
+          :disabled="agentRunning"
+          title="一键渗透"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+            <path d="M2 17l10 5 10-5"></path>
+            <path d="M2 12l10 5 10-5"></path>
+          </svg>
+          一键渗透
+        </button>
         <button 
           v-if="state.viewMode === 'list'"
           class="payloader-btn payloader-btn--primary" 
@@ -117,14 +142,29 @@
 
     <PayloaderContent>
       <!-- Agent 启动确认弹窗 -->
-      <div v-if="showUrlModal" class="payloader-modal-overlay" @click.self="showUrlModal = false">
+      <div v-if="showPentestModal" class="payloader-modal-overlay" @click.self="closePentestModal">
         <div class="payloader-modal">
           <div class="payloader-modal-header">
             <h3>一键渗透检测</h3>
-            <button class="payloader-modal-close" @click="showUrlModal = false">&times;</button>
+            <button class="payloader-modal-close" @click="closePentestModal">&times;</button>
           </div>
           <div class="payloader-modal-body">
-            <p class="payloader-modal-desc">将自动对当前连接的主机系统执行以下5阶段安全检测：</p>
+            <p class="payloader-modal-desc">请输入要检测的目标 IP 地址或域名，系统会按以下 5 个阶段执行自动化安全验证流程。</p>
+            <div class="payloader-modal-input-group">
+              <label class="payloader-modal-label" for="payloader-pentest-target">目标 IP / 域名</label>
+              <input
+                id="payloader-pentest-target"
+                v-model="pentestTarget"
+                class="payloader-modal-input"
+                type="text"
+                placeholder="例如: 192.168.1.10 或 example.com"
+                autocomplete="off"
+                spellcheck="false"
+                @keyup.enter="startHostAgent"
+              />
+              <p class="payloader-modal-helper">仅用于你已授权的目标资产。支持输入 IP 地址或域名。</p>
+            </div>
+            <div v-if="pentestModalError" class="payloader-modal-error">{{ pentestModalError }}</div>
             <div class="payloader-agent-phases-overview">
               <div class="payloader-agent-phase-item">
                 <span class="payloader-agent-phase-num">1</span>
@@ -149,10 +189,10 @@
             </div>
           </div>
           <div class="payloader-modal-footer">
-            <button class="payloader-btn payloader-btn--secondary" @click="showUrlModal = false">取消</button>
+            <button class="payloader-btn payloader-btn--secondary" @click="closePentestModal">取消</button>
             <button
               class="payloader-btn payloader-btn--primary"
-              :disabled="agentRunning"
+              :disabled="agentRunning || !normalizedPentestTarget"
               @click="startHostAgent"
             >
               {{ agentRunning ? '运行中...' : '开始检测' }}
@@ -166,14 +206,69 @@
         <div class="payloader-modal payloader-modal--result">
           <div class="payloader-modal-header">
             <h3>渗透结果分析</h3>
-            <button v-if="!agentRunning" class="payloader-modal-close" @click="showResultModal = false">&times;</button>
+            <div class="payloader-modal-header-actions">
+              <button class="payloader-modal-header-btn" :disabled="!currentTaskId" @click="openLogModal()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                日志
+              </button>
+              <button v-if="!agentRunning" class="payloader-modal-close" @click="showResultModal = false">&times;</button>
+            </div>
           </div>
           <div class="payloader-modal-body payloader-modal-body--scroll">
             <!-- 运行中 -->
             <div v-if="agentRunning" class="payloader-agent-running">
               <div class="payloader-agent-running-spinner"></div>
-              <p class="payloader-agent-running-text">正在执行一键渗透检测...</p>
+              <p class="payloader-agent-running-text">正在对 {{ pentestTarget || '目标资产' }} 执行一键渗透检测...</p>
               <p class="payloader-agent-running-sub">5 阶段自动化验证链</p>
+              <div v-if="agentResult" class="payloader-agent-live-panel">
+                <div class="payloader-agent-live-stats">
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">当前阶段</span>
+                    <span class="payloader-agent-live-value">{{ getPhaseLabel(agentResult.phase) }}</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">已执行动作</span>
+                    <span class="payloader-agent-live-value">{{ agentResult.actions_count || 0 }} 步</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">资产发现</span>
+                    <span class="payloader-agent-live-value">{{ agentResult.findings_count || 0 }} 项</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">漏洞发现</span>
+                    <span class="payloader-agent-live-value">{{ agentResult.vuln_count || 0 }} 项</span>
+                  </div>
+                </div>
+                <div class="payloader-agent-live-log">
+                  <div class="payloader-agent-live-log-header">
+                    <h4>AI 最近执行记录</h4>
+                    <span>{{ (agentResult.actions || []).length }} 条</span>
+                  </div>
+                  <div v-if="agentResult.actions && agentResult.actions.length > 0" class="payloader-agent-action-list">
+                    <div v-for="(action, idx) in agentResult.actions" :key="`${action.time}-${idx}`" class="payloader-agent-action-item">
+                      <div class="payloader-agent-action-top">
+                        <span class="payloader-agent-action-tool">{{ action.tool }}</span>
+                        <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
+                      </div>
+                      <div class="payloader-agent-action-block">
+                        <span class="payloader-agent-action-label">参数</span>
+                        <pre class="payloader-agent-action-args">{{ formatActionPayload(action.args, '无参数') }}</pre>
+                      </div>
+                      <div class="payloader-agent-action-block">
+                        <span class="payloader-agent-action-label">输出</span>
+                        <pre class="payloader-agent-action-result">{{ formatActionPayload(action.result, '暂无输出') }}</pre>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="payloader-agent-action-empty">AI 已启动，正在等待第一条执行记录...</div>
+                </div>
+              </div>
             </div>
 
             <!-- 错误 -->
@@ -192,6 +287,38 @@
                   <span :class="['payloader-agent-status', agentResult.status]">
                     {{ agentResult.status === 'completed' ? '已完成' : agentResult.status === 'failed' ? '失败' : '运行中' }}
                   </span>
+                </div>
+                <p class="payloader-agent-summary-text">
+                  当前阶段：{{ getPhaseLabel(agentResult.final?.phase || agentResult.phase) }}，
+                  已执行动作 {{ agentResult.actions_count || 0 }} 步，
+                  发现资产 {{ agentResult.findings_count || 0 }} 项，
+                  发现漏洞 {{ agentResult.vuln_count || 0 }} 项。
+                </p>
+              </div>
+
+              <div v-if="agentResult.actions && agentResult.actions.length > 0" class="payloader-agent-section payloader-agent-live-log-section">
+                <h4 class="payloader-agent-section-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 11l3 3L22 4"></path>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                  </svg>
+                  AI 执行记录
+                </h4>
+                <div class="payloader-agent-action-list">
+                  <div v-for="(action, idx) in agentResult.actions" :key="`${action.time}-${idx}`" class="payloader-agent-action-item">
+                    <div class="payloader-agent-action-top">
+                      <span class="payloader-agent-action-tool">{{ action.tool }}</span>
+                      <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
+                    </div>
+                    <div class="payloader-agent-action-block">
+                      <span class="payloader-agent-action-label">参数</span>
+                      <pre class="payloader-agent-action-args">{{ formatActionPayload(action.args, '无参数') }}</pre>
+                    </div>
+                    <div class="payloader-agent-action-block">
+                      <span class="payloader-agent-action-label">输出</span>
+                      <pre class="payloader-agent-action-result">{{ formatActionPayload(action.result, '暂无输出') }}</pre>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -379,6 +506,97 @@
           <div v-if="!agentRunning" class="payloader-modal-footer">
             <button class="payloader-btn payloader-btn--secondary" @click="showResultModal = false">关闭</button>
             <button class="payloader-btn payloader-btn--primary" @click="showResultModal = false; startHostAgent()">重新检测</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 日志弹窗 -->
+      <div v-if="showLogModal" class="payloader-modal-overlay payloader-log-overlay" @click.self="closeLogModal">
+        <div class="payloader-modal payloader-modal--log">
+          <div class="payloader-modal-header">
+            <div class="payloader-log-header-main">
+              <h3>执行日志 ({{ logData.length }} 条)</h3>
+              <p v-if="currentLogTaskId" class="payloader-log-header-sub">
+                任务 {{ currentLogTaskId }} · 当前阶段 {{ getPhaseLabel(logPhase) }}
+              </p>
+            </div>
+            <div class="payloader-modal-header-actions">
+              <button
+                v-if="currentLogTaskId"
+                class="payloader-modal-header-btn"
+                :disabled="logLoading"
+                @click="loadLogs(currentLogTaskId)"
+              >
+                刷新
+              </button>
+              <button class="payloader-modal-close" @click="closeLogModal">&times;</button>
+            </div>
+          </div>
+          <div class="payloader-modal-body payloader-modal-body--scroll payloader-log-body">
+            <div v-if="logLoading && logData.length === 0" class="payloader-log-empty">正在加载日志...</div>
+            <div v-else-if="logError" class="payloader-log-empty payloader-log-empty--error">{{ logError }}</div>
+            <div v-else-if="logData.length === 0" class="payloader-log-empty">
+              {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
+            </div>
+            <div v-for="(log, idx) in logData" :key="idx" class="payloader-log-entry">
+              <div class="payloader-log-meta">
+                <span class="payloader-log-round">#{{ idx + 1 }}</span>
+                <span class="payloader-log-tool">{{ log.tool }}</span>
+                <span :class="['payloader-log-status', `payloader-log-status--${log.status || 'completed'}`]">
+                  {{ getLogStatusLabel(log.status) }}
+                </span>
+                <span class="payloader-log-time">{{ formatActionTime(log.time) }}</span>
+                <span v-if="log.returncode !== null" :class="['payloader-log-rc', log.returncode === 0 ? 'ok' : 'err']">rc={{ log.returncode }}</span>
+              </div>
+              <div class="payloader-log-think">
+                <div class="payloader-log-think-label">🤖 AI 决策</div>
+                <pre class="payloader-log-think-content">{{ formatActionPayload(log.llm_decision, '[暂无决策记录]') }}</pre>
+              </div>
+              <div v-if="log.args" class="payloader-log-args">
+                <div class="payloader-log-args-label">📌 参数</div>
+                <pre class="payloader-log-code">{{ formatActionPayload(log.args, '无参数') }}</pre>
+              </div>
+              <div v-if="log.full_stdout || log.result || log.status === 'running'" class="payloader-log-stdout">
+                <div class="payloader-log-stdout-label">📤 原始输出</div>
+                <pre class="payloader-log-code">{{ formatActionPayload(log.full_stdout || log.result, log.status === 'running' ? '工具执行中，等待输出...' : '暂无输出') }}</pre>
+              </div>
+              <div v-if="log.error" class="payloader-log-error">
+                <div class="payloader-log-error-label">❌ 错误</div>
+                <pre class="payloader-log-code">{{ formatActionPayload(log.error, '暂无错误信息') }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 历史弹窗 -->
+      <div v-if="showHistoryModal" class="payloader-modal-overlay" @click.self="showHistoryModal = false">
+        <div class="payloader-modal payloader-modal--history">
+          <div class="payloader-modal-header">
+            <h3>渗透历史 ({{ historyData.length }} 条)</h3>
+            <button class="payloader-modal-close" @click="showHistoryModal = false">&times;</button>
+          </div>
+          <div class="payloader-modal-body payloader-modal-body--scroll">
+            <div v-if="historyData.length === 0" class="payloader-log-empty">暂无历史记录</div>
+            <div v-for="item in historyData" :key="item.task_id" class="payloader-history-item">
+              <div class="payloader-history-main">
+                <div class="payloader-history-target">{{ item.target }}</div>
+                <div class="payloader-history-meta">
+                  <span class="payloader-history-time">{{ item.start_time }}</span>
+                  <span :class="['payloader-history-status', item.status]">{{ item.status }}</span>
+                  <span class="payloader-history-phase">{{ getPhaseLabel(item.phase) }}</span>
+                </div>
+              </div>
+              <div class="payloader-history-stats">
+                <span class="payloader-history-stat">🔍 {{ item.findings_count }}</span>
+                <span class="payloader-history-stat">⚠️ {{ item.vuln_count }}</span>
+                <span class="payloader-history-stat">🛠 {{ item.actions_count }}</span>
+              </div>
+              <div class="payloader-history-actions">
+                <button class="payloader-btn payloader-btn--secondary payloader-btn--sm" @click="viewHistoryLogs(item.task_id)">日志</button>
+                <button class="payloader-btn payloader-btn--secondary payloader-btn--sm" @click="deleteHistory(item.task_id)">删除</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -664,7 +882,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import PayloaderToolbar from './components/PayloaderToolbar.vue';
 import PayloaderContent from './components/PayloaderContent.vue';
 import EncodingTools from './components/EncodingTools.vue';
@@ -842,12 +1060,372 @@ const handleCopy = async (code: string) => {
   await copyPayload(code);
 };
 
+// ==================== 一键渗透 Agent ====================
+const showPentestModal = ref(false);
+const showResultModal = ref(false);
+const agentRunning = ref(false);
+const agentError = ref('');
+const agentResult = ref<any>(null);
+const pentestTarget = ref<string>('');
+const pentestModalError = ref('');
+const normalizedPentestTarget = computed(() => String(pentestTarget.value || '').trim());
+const currentTaskId = ref<string>('');
+
+let statusTimer: ReturnType<typeof setInterval> | null = null;
+
+function getAIConfig() {
+  try {
+    const raw = localStorage.getItem('LERT-ai-config');
+    if (!raw) return null;
+    const cfg = JSON.parse(raw);
+    return {
+      apiKey: cfg.apiKey || '',
+      model: cfg.model || 'gpt-4o-mini',
+      baseUrl: cfg.baseUrl || 'https://api.openai.com/v1',
+      provider: cfg.provider || 'openai',
+      temperature: cfg.temperature ?? 0.3,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function openPentestModal() {
+  pentestModalError.value = '';
+  showPentestModal.value = true;
+}
+
+function closePentestModal() {
+  pentestModalError.value = '';
+  showPentestModal.value = false;
+}
+
+function getPhaseLabel(phase: string | undefined) {
+  switch (phase) {
+    case 'init':
+      return '初始化';
+    case 'recon':
+      return '侦察与信息收集';
+    case 'web':
+      return 'Web 漏洞发现';
+    case 'exploit':
+      return '漏洞利用';
+    case 'post':
+      return '后渗透与证据收集';
+    case 'lateral':
+      return '横向移动与扩展';
+    case 'done':
+      return '已完成';
+    default:
+      return phase || '运行中';
+  }
+}
+
+function formatActionTime(value: string | undefined) {
+  if (!value) {
+    return '刚刚';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatActionPayload(value: unknown, fallback: string) {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return fallback;
+  }
+
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
+  }
+
+  return text;
+}
+
+async function startHostAgent() {
+  const aiConfig = getAIConfig();
+  if (!aiConfig || !aiConfig.apiKey) {
+    agentError.value = '请先在 AI 设置中配置 LLM API Key';
+    showResultModal.value = true;
+    return;
+  }
+
+  const normalizedTarget = normalizedPentestTarget.value;
+  if (!normalizedTarget) {
+    pentestModalError.value = '请输入目标 IP 地址或域名';
+    return;
+  }
+
+  pentestModalError.value = '';
+
+  showPentestModal.value = false;
+  showResultModal.value = true;
+  agentRunning.value = true;
+  agentError.value = '';
+  agentResult.value = null;
+
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const startRes = await pythonApi.pentestStart({
+      target: normalizedTarget,
+      max_rounds: 30,
+      dry_run: false,
+      api_key: aiConfig.apiKey,
+      model: aiConfig.model,
+      base_url: aiConfig.baseUrl,
+      provider: aiConfig.provider,
+      temperature: aiConfig.temperature,
+    });
+
+    if (!startRes.success) {
+      agentRunning.value = false;
+      agentError.value = startRes.message;
+      return;
+    }
+
+    currentTaskId.value = startRes.task_id;
+    statusTimer = setInterval(pollStatus, 2000);
+  } catch (err: any) {
+    agentRunning.value = false;
+    agentError.value = err?.message || '启动渗透任务失败';
+  }
+}
+
+async function pollStatus() {
+  if (!currentTaskId.value) return;
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const status = await pythonApi.pentestStatus(currentTaskId.value);
+
+    if (!status.running) {
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+      agentRunning.value = false;
+
+      const report = await pythonApi.pentestGetReport(currentTaskId.value);
+      agentResult.value = {
+        status: status.phase === 'done' ? 'completed' : 'failed',
+        final: { report: report.report, phase: report.phase },
+        phase: status.phase,
+        targets: status.targets,
+        findings_count: status.findings_count,
+        vuln_count: status.vuln_count,
+        actions_count: status.actions_count,
+        actions: status.actions,
+      };
+    } else {
+      agentResult.value = {
+        status: 'running',
+        phase: status.phase,
+        targets: status.targets,
+        findings_count: status.findings_count,
+        vuln_count: status.vuln_count,
+        actions_count: status.actions_count,
+        actions: status.actions,
+      };
+    }
+  } catch (err: any) {
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    agentRunning.value = false;
+    agentError.value = err?.message || '查询状态失败';
+  }
+}
+
+// ==================== 日志查看 ====================
+const showLogModal = ref(false);
+const logData = ref<Array<{
+  id?: string;
+  tool: string;
+  args: string;
+  time: string;
+  result: string;
+  full_stdout: string;
+  llm_decision: string;
+  returncode: number | null;
+  error: string;
+  status?: string;
+  updated_at?: string;
+}>>([]);
+const logLoading = ref(false);
+const logError = ref('');
+const logPhase = ref<string>('init');
+const currentLogTaskId = ref('');
+
+let logTimer: ReturnType<typeof setInterval> | null = null;
+
+function getLogStatusLabel(status: string | undefined) {
+  switch (status) {
+    case 'running':
+      return '执行中';
+    case 'failed':
+      return '失败';
+    case 'dry_run':
+      return '演练';
+    default:
+      return '已完成';
+  }
+}
+
+function normalizeLogEntry(log: Record<string, unknown>) {
+  return {
+    id: typeof log.id === 'string' ? log.id : undefined,
+    tool: String(log.tool || 'unknown'),
+    args: String(log.args || ''),
+    time: String(log.time || ''),
+    result: String(log.result || ''),
+    full_stdout: String(log.full_stdout || ''),
+    llm_decision: String(log.llm_decision || ''),
+    returncode: typeof log.returncode === 'number' ? log.returncode : null,
+    error: String(log.error || ''),
+    status: typeof log.status === 'string' ? log.status : 'completed',
+    updated_at: typeof log.updated_at === 'string' ? log.updated_at : undefined,
+  };
+}
+
+function stopLogPolling() {
+  if (logTimer) {
+    clearInterval(logTimer);
+    logTimer = null;
+  }
+}
+
+function syncLogPolling() {
+  stopLogPolling();
+
+  if (!showLogModal.value || !currentLogTaskId.value) {
+    return;
+  }
+
+  if (currentLogTaskId.value === currentTaskId.value && agentRunning.value) {
+    logTimer = setInterval(() => {
+      void loadLogs(currentLogTaskId.value, true);
+    }, 1500);
+  }
+}
+
+async function openLogModal(taskId?: string) {
+  const tid = taskId || currentTaskId.value;
+  showLogModal.value = true;
+  logError.value = '';
+
+  if (!tid) {
+    logData.value = [];
+    logPhase.value = 'init';
+    logError.value = '当前任务尚未生成日志，请稍后再试。';
+    return;
+  }
+
+  if (currentLogTaskId.value !== tid) {
+    logData.value = [];
+  }
+  currentLogTaskId.value = tid;
+  await loadLogs(tid);
+}
+
+function closeLogModal() {
+  stopLogPolling();
+  showLogModal.value = false;
+}
+
+async function loadLogs(taskId?: string, silent = false) {
+  const tid = taskId || currentLogTaskId.value || currentTaskId.value;
+  if (!tid) return;
+
+  currentLogTaskId.value = tid;
+  if (!silent) {
+    logLoading.value = true;
+  }
+  logError.value = '';
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const res = await pythonApi.pentestLogs(tid);
+    logPhase.value = res.phase || 'init';
+    logData.value = (res.actions || []).map(normalizeLogEntry);
+  } catch (err: any) {
+    console.error('加载日志失败:', err);
+    logError.value = err?.message || '加载日志失败';
+  } finally {
+    logLoading.value = false;
+    syncLogPolling();
+  }
+}
+
+// ==================== 历史记录 ====================
+const showHistoryModal = ref(false);
+const historyData = ref<Array<{
+  task_id: string;
+  target: string;
+  start_time: string;
+  status: string;
+  phase: string;
+  findings_count: number;
+  vuln_count: number;
+  actions_count: number;
+}>>([]);
+
+async function loadHistory() {
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const res = await pythonApi.pentestHistory();
+    historyData.value = res.history || [];
+  } catch (err: any) {
+    console.error('加载历史失败:', err);
+  }
+}
+
+async function viewHistoryLogs(taskId: string) {
+  showHistoryModal.value = false;
+  await openLogModal(taskId);
+}
+
+async function deleteHistory(taskId: string) {
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    await pythonApi.pentestDeleteHistory(taskId);
+    await loadHistory();
+  } catch (err: any) {
+    console.error('删除历史失败:', err);
+  }
+}
+
 document.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
   if (!target.closest('.payloader-dropdown')) {
     showViewDropdown.value = false;
     showCategoryDropdown.value = false;
   }
+});
+
+onUnmounted(() => {
+  if (statusTimer) {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  }
+  stopLogPolling();
 });
 </script>
 
@@ -1631,6 +2209,33 @@ document.addEventListener('click', (e) => {
   cursor: not-allowed;
 }
 
+.payloader-btn--pentest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  border: 1px solid #c0392b;
+  border-radius: var(--border-radius);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.payloader-btn--pentest:hover:not(:disabled) {
+  background: linear-gradient(135deg, #c0392b, #a93226);
+  border-color: #a93226;
+  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+}
+
+.payloader-btn--pentest:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* 工具和编解码按钮样式 */
 .payloader-btn--tool {
   display: flex;
@@ -1682,6 +2287,177 @@ document.addEventListener('click', (e) => {
   font-size: 14px;
   color: var(--primary-color);
   font-weight: 500;
+}
+
+.payloader-agent-running-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.payloader-agent-live-panel {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.payloader-agent-live-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.payloader-agent-live-stat {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.payloader-agent-live-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.payloader-agent-live-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.payloader-agent-live-log {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.payloader-agent-live-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.payloader-agent-live-log-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.payloader-agent-live-log-header span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.payloader-agent-live-log-section {
+  padding-top: 16px;
+}
+
+.payloader-agent-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.payloader-agent-action-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.payloader-agent-action-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.payloader-agent-action-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.payloader-agent-action-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.payloader-agent-action-tool {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+.payloader-agent-action-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.payloader-agent-action-args {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(66, 153, 225, 0.18);
+  border-radius: 8px;
+  background: rgba(66, 153, 225, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.payloader-agent-action-result {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.payloader-agent-action-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 12px 0 4px;
+}
+
+[data-theme="light"] .payloader-agent-action-result {
+  background: #f8fbff;
+  border-color: rgba(66, 153, 225, 0.18);
+}
+
+[data-theme="dark"] .payloader-agent-action-args {
+  background: rgba(66, 153, 225, 0.12);
+  border-color: rgba(96, 165, 250, 0.28);
+}
+
+[data-theme="dark"] .payloader-agent-action-result {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.28);
 }
 
 /* Agent 错误 */
@@ -2452,6 +3228,13 @@ document.addEventListener('click', (e) => {
   color: var(--text-tertiary, #71717a);
 }
 
+.payloader-modal-helper {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #a1a1aa);
+}
+
 .payloader-modal-error {
   margin-top: 12px;
   padding: 10px 14px;
@@ -2800,5 +3583,321 @@ document.addEventListener('click', (e) => {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+/* ── 日志模态框 ── */
+.payloader-modal--log {
+  width: 85vw;
+  max-width: 1200px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.payloader-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payloader-log-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.payloader-log-header-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.payloader-modal-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.payloader-modal-header-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.payloader-modal-header-btn:hover {
+  background: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+}
+
+.payloader-modal-header-btn:disabled:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.payloader-log-body {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-tertiary);
+  padding: 16px;
+}
+
+.payloader-log-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 40px 0;
+}
+
+.payloader-log-empty--error {
+  color: var(--error-color);
+}
+
+.payloader-log-entry {
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.payloader-log-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.payloader-log-round {
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.payloader-log-tool {
+  color: var(--accent-color, var(--primary-color));
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.payloader-log-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.payloader-log-status--running {
+  background: rgba(66, 153, 225, 0.15);
+  color: var(--primary-color);
+}
+
+.payloader-log-status--completed {
+  background: rgba(72, 187, 120, 0.15);
+  color: var(--success-color);
+}
+
+.payloader-log-status--failed {
+  background: rgba(245, 101, 101, 0.15);
+  color: var(--error-color);
+}
+
+.payloader-log-status--dry_run {
+  background: rgba(237, 137, 54, 0.15);
+  color: var(--warning-color);
+}
+
+.payloader-log-time {
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.payloader-log-rc {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.payloader-log-rc.ok {
+  background: var(--success-color, #238636);
+  color: #fff;
+}
+
+.payloader-log-rc.err {
+  background: var(--error-color, #da3633);
+  color: #fff;
+}
+
+.payloader-log-think,
+.payloader-log-args,
+.payloader-log-stdout,
+.payloader-log-error {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.payloader-log-think-label,
+.payloader-log-args-label,
+.payloader-log-stdout-label,
+.payloader-log-error-label {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.payloader-log-think-label { color: var(--primary-color); }
+.payloader-log-args-label { color: var(--info-color, var(--primary-color)); }
+.payloader-log-stdout-label { color: var(--success-color, #3fb950); }
+.payloader-log-error-label { color: var(--error-color, #f85149); }
+
+.payloader-log-think-content {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+.payloader-log-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* ── 历史按钮 ── */
+.payloader-btn--history {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.payloader-btn--history:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* ── 历史弹窗 ── */
+.payloader-modal--history {
+  width: 600px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.payloader-history-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
+}
+
+.payloader-history-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.payloader-history-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.payloader-history-target {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.payloader-history-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.payloader-history-time {
+  color: var(--text-secondary);
+}
+
+.payloader-history-status {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.payloader-history-status.running {
+  background: #e6a23c33;
+  color: #e6a23c;
+}
+
+.payloader-history-status.done {
+  background: #67c23a33;
+  color: #67c23a;
+}
+
+.payloader-history-status.stopped {
+  background: #f56c6c33;
+  color: #f56c6c;
+}
+
+.payloader-history-phase {
+  color: var(--text-secondary);
+}
+
+.payloader-history-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.payloader-history-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.payloader-btn--sm {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 </style>

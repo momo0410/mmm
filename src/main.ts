@@ -1404,6 +1404,221 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
     }
   };
 
+  // 显示 Skills 管理模态框
+  (window as any).showSkillsModal = async () => {
+    const existing = document.getElementById('skills-modal');
+    if (existing) existing.remove();
+
+    const modalHTML = app.getStateManager().getUIRenderer().renderSkillsModal();
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    const modal = document.getElementById('skills-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.style.pointerEvents = 'auto';
+      modal.offsetHeight;
+      modal.style.opacity = '1';
+      const content = modal.querySelector('.modal-content') as HTMLElement;
+      if (content) content.style.transform = 'scale(1)';
+    }
+
+    await (window as any).refreshSkillsList?.();
+  };
+
+  // 隐藏 Skills 管理模态框
+  (window as any).hideSkillsModal = () => {
+    const modal = document.getElementById('skills-modal');
+    if (modal) {
+      modal.style.opacity = '0';
+      modal.style.pointerEvents = 'none';
+      const content = modal.querySelector('.modal-content') as HTMLElement;
+      if (content) content.style.transform = 'scale(0.98)';
+      setTimeout(() => { if (modal.parentNode) modal.parentNode.removeChild(modal); }, 200);
+    }
+  };
+
+  // 刷新 Skills 列表
+  (window as any).refreshSkillsList = async () => {
+    const container = document.getElementById('skills-list-container');
+    if (!container) return;
+    try {
+      const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+      const res = await fetch(`${base}/skills`);
+      const data = await res.json();
+      const items = data.items || [];
+      let html = '';
+      for (const item of items) {
+        html += `
+          <div class="skill-item" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; background: var(--bg-secondary);">
+            <input type="checkbox" class="skill-checkbox" data-filename="${item.filename}" style="accent-color: var(--accent-color);">
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${item.name}</div>
+              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.description || item.filename}</div>
+            </div>
+          </div>
+        `;
+      }
+      if (!html) html = `<div style="text-align: center; color: var(--text-secondary); padding: 40px;">暂无 Skills</div>`;
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align: center; color: var(--error-color); padding: 40px;">加载失败</div>`;
+    }
+  };
+
+  // 删除选中的 Skills
+  (window as any).deleteSelectedSkills = async () => {
+    const checkboxes = document.querySelectorAll('.skill-checkbox:checked');
+    if (checkboxes.length === 0) {
+      (window as any).showNotification?.('请先选择要删除的 Skill', 'warning');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${checkboxes.length} 个 Skill 吗？`)) return;
+    const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+    for (const cb of Array.from(checkboxes)) {
+      const filename = (cb as HTMLElement).dataset.filename;
+      try {
+        await fetch(`${base}/skills/${filename}`, { method: 'DELETE' });
+      } catch (e) { /* ignore */ }
+    }
+    await (window as any).refreshSkillsList?.();
+    (window as any).showNotification?.('删除成功', 'success');
+  };
+
+  // 增加 Skill 提示
+  (window as any).addSkillPrompt = async () => {
+    const name = prompt('请输入 Skill 名称:');
+    if (!name) return;
+    const description = prompt('请输入 Skill 描述:', '');
+    const content = prompt('请输入 JSON 内容:', '{"name":"' + name + '","description":"' + (description || '') + '"}');
+    if (!content) return;
+    try { JSON.parse(content); } catch (e) {
+      (window as any).showNotification?.('无效的 JSON 内容', 'error');
+      return;
+    }
+    const blob = new Blob([content], { type: 'application/json' });
+    const file = new File([blob], `${name}.json`, { type: 'application/json' });
+    const formData = new FormData();
+    formData.append('file', file);
+    const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+    try {
+      const res = await fetch(`${base}/skills`, { method: 'POST', body: formData });
+      if (res.ok) {
+        await (window as any).refreshSkillsList?.();
+        (window as any).showNotification?.('添加成功', 'success');
+      } else {
+        const err = await res.json();
+        (window as any).showNotification?.(err.detail || '添加失败', 'error');
+      }
+    } catch (e) {
+      (window as any).showNotification?.('添加失败', 'error');
+    }
+  };
+
+  // 显示本地知识库管理模态框
+  (window as any).showKnowledgeBaseModal = async () => {
+    const existing = document.getElementById('knowledge-base-modal');
+    if (existing) existing.remove();
+
+    const modalHTML = app.getStateManager().getUIRenderer().renderKnowledgeBaseModal();
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    const modal = document.getElementById('knowledge-base-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.style.pointerEvents = 'auto';
+      modal.offsetHeight;
+      modal.style.opacity = '1';
+      const content = modal.querySelector('.modal-content') as HTMLElement;
+      if (content) content.style.transform = 'scale(1)';
+    }
+
+    await (window as any).refreshKnowledgeBaseList?.();
+  };
+
+  // 隐藏本地知识库管理模态框
+  (window as any).hideKnowledgeBaseModal = () => {
+    const modal = document.getElementById('knowledge-base-modal');
+    if (modal) {
+      modal.style.opacity = '0';
+      modal.style.pointerEvents = 'none';
+      const content = modal.querySelector('.modal-content') as HTMLElement;
+      if (content) content.style.transform = 'scale(0.98)';
+      setTimeout(() => { if (modal.parentNode) modal.parentNode.removeChild(modal); }, 200);
+    }
+  };
+
+  // 刷新本地知识库列表
+  (window as any).refreshKnowledgeBaseList = async () => {
+    const container = document.getElementById('knowledge-base-list-container');
+    if (!container) return;
+    try {
+      const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+      const res = await fetch(`${base}/knowledge-base`);
+      const data = await res.json();
+      const items = data.items || [];
+      let html = '';
+      for (const item of items) {
+        html += `
+          <div class="kb-item" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; background: var(--bg-secondary);">
+            <input type="checkbox" class="kb-checkbox" data-filename="${item.filename}" style="accent-color: var(--accent-color);">
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${item.name}</div>
+              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.description || item.filename}</div>
+            </div>
+          </div>
+        `;
+      }
+      if (!html) html = `<div style="text-align: center; color: var(--text-secondary); padding: 40px;">暂无本地知识库条目</div>`;
+      container.innerHTML = html;
+    } catch (e) {
+      container.innerHTML = `<div style="text-align: center; color: var(--error-color); padding: 40px;">加载失败</div>`;
+    }
+  };
+
+  // 删除选中的知识库条目
+  (window as any).deleteSelectedKnowledgeBase = async () => {
+    const checkboxes = document.querySelectorAll('.kb-checkbox:checked');
+    if (checkboxes.length === 0) {
+      (window as any).showNotification?.('请先选择要删除的条目', 'warning');
+      return;
+    }
+    if (!confirm(`确定要删除选中的 ${checkboxes.length} 个条目吗？`)) return;
+    const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+    for (const cb of Array.from(checkboxes)) {
+      const filename = (cb as HTMLElement).dataset.filename;
+      try {
+        await fetch(`${base}/knowledge-base/${filename}`, { method: 'DELETE' });
+      } catch (e) { /* ignore */ }
+    }
+    await (window as any).refreshKnowledgeBaseList?.();
+    (window as any).showNotification?.('删除成功', 'success');
+  };
+
+  // 增加知识库条目提示
+  (window as any).addKnowledgeBasePrompt = async () => {
+    const name = prompt('请输入知识库条目名称:');
+    if (!name) return;
+    const description = prompt('请输入描述:', '');
+    const content = prompt('请输入内容:', '');
+    const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+    try {
+      const res = await fetch(`${base}/knowledge-base`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: description || '', content: content || '' }),
+      });
+      if (res.ok) {
+        await (window as any).refreshKnowledgeBaseList?.();
+        (window as any).showNotification?.('添加成功', 'success');
+      } else {
+        const err = await res.json();
+        (window as any).showNotification?.(err.detail || '添加失败', 'error');
+      }
+    } catch (e) {
+      (window as any).showNotification?.('添加失败', 'error');
+    }
+  };
+
   // 显示添加服务器表单
   (window as any).showAddServerForm = () => {
     const serverList = document.getElementById('server-list');

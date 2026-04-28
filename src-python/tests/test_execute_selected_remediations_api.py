@@ -1,48 +1,26 @@
-"""Execute Selected Remediations API tests.
-
-Covers regression and guardrail behavior for /api/v1/execute-selected-remediations.
-"""
-
 from __future__ import annotations
-
 from typing import Any, Dict, List
-
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-
 from app.main import app
 from app.routers import api as api_router
-
-
 class FakeSSHManager:
-    """Fake matching the real SSHManager shape (no get_default_connection_id)."""
-
     def __init__(self, connected: bool = True) -> None:
         self._connected = connected
         self.calls: List[Dict[str, Any]] = []
-
     def is_connected(self) -> bool:
         return self._connected
-
     async def execute_command(self, command: str):
         self.calls.append({"command": command})
         return {"exit_code": 0, "output": "ok", "command": command}
-
-
 class FakeSSHManagerDisconnected:
-    """Disconnected SSH manager fake."""
-
     def is_connected(self) -> bool:
         return False
-
     async def execute_command(self, command: str):
         raise ConnectionError("No active SSH connection")
-
-
 def test_dry_run_no_ssh_connection_required(monkeypatch) -> None:
     fake_ssh = FakeSSHManagerDisconnected()
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake_ssh)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -63,20 +41,15 @@ def test_dry_run_no_ssh_connection_required(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
-
     assert payload["overall_status"] == "dry_run"
     assert payload["approval_tickets"]
     assert payload["results"][0]["execution_status"] == "dry_run"
     assert payload["results"][0]["approval_ticket"] is not None
-
-
 def test_rollback_preview_no_ssh_connection_required(monkeypatch) -> None:
     fake_ssh = FakeSSHManagerDisconnected()
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake_ssh)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -97,21 +70,15 @@ def test_rollback_preview_no_ssh_connection_required(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
-
     assert payload["overall_status"] == "rollback_preview"
     assert payload["results"][0]["execution_status"] == "rollback_preview"
     assert payload["results"][0]["rollback_preview"]["supported"] is True
-
-
 def test_dry_run_with_uninitialized_ssh_manager_no_500(monkeypatch) -> None:
     def _raise_uninitialized():
         raise HTTPException(status_code=500, detail="SSH manager is unavailable")
-
     monkeypatch.setattr(api_router, "get_ssh_manager", _raise_uninitialized)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -130,16 +97,12 @@ def test_dry_run_with_uninitialized_ssh_manager_no_500(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["overall_status"] == "dry_run"
     assert payload["results"][0]["execution_status"] == "dry_run"
-
-
 def test_rollback_preview_with_none_ssh_manager_no_500(monkeypatch) -> None:
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: None)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -158,17 +121,13 @@ def test_rollback_preview_with_none_ssh_manager_no_500(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["overall_status"] == "rollback_preview"
     assert payload["results"][0]["execution_status"] == "rollback_preview"
-
-
 def test_no_ssh_connection_returns_error_not_500(monkeypatch) -> None:
     fake_ssh = FakeSSHManagerDisconnected()
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake_ssh)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -187,17 +146,13 @@ def test_no_ssh_connection_returns_error_not_500(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert "error" in payload
     assert "SSH" in payload["error"]
-
-
 def test_approval_required_before_mutation(monkeypatch) -> None:
     fake_ssh = FakeSSHManager()
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake_ssh)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -215,20 +170,15 @@ def test_approval_required_before_mutation(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
-
     assert payload["overall_status"] == "pending_approval"
     assert payload["results"][0]["execution_status"] == "pending_approval"
     assert payload["results"][0]["approval_ticket"] is not None
     assert fake_ssh.calls == []
-
-
 def test_budget_guard_blocks_execution(monkeypatch) -> None:
     fake_ssh = FakeSSHManager()
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake_ssh)
-
     client = TestClient(app)
     response = client.post(
         "/api/v1/execute-selected-remediations",
@@ -253,31 +203,22 @@ def test_budget_guard_blocks_execution(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert response.status_code == 200
     payload = response.json()
-
     assert payload["overall_status"] == "blocked"
     assert payload["results"][0]["execution_status"] == "blocked"
     assert "Budget exceeded" in (payload["results"][0]["error"] or "")
-
-
 def test_regression_no_get_default_connection_id(monkeypatch) -> None:
     class RealisticFake:
         def __init__(self):
             self._connected = True
-
         def is_connected(self) -> bool:
             return self._connected
-
         async def execute_command(self, command: str):
             return {"exit_code": 0, "output": "ok", "command": command}
-
     fake = RealisticFake()
     assert not hasattr(fake, "get_default_connection_id")
-
     monkeypatch.setattr(api_router, "get_ssh_manager", lambda: fake)
-
     client = TestClient(app)
     resp = client.post(
         "/api/v1/execute-selected-remediations",
@@ -296,6 +237,5 @@ def test_regression_no_get_default_connection_id(monkeypatch) -> None:
         },
     )
     client.close()
-
     assert resp.status_code == 200
     assert resp.json()["overall_status"] == "dry_run"

@@ -6,6 +6,29 @@
 import { EventEmitter } from '../utils/EventEmitter';
 import { aiService, type AIProvider } from '../ai/aiService';
 
+export interface AIProviderSettings {
+  name: string;
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+  useProxy: boolean;
+  proxyType: 'http' | 'https' | 'socks5';
+  proxyUrl: string;
+}
+
+export interface AIPrimaryModelSettings {
+  provider: string;
+  model: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+export interface AISettings {
+  currentProvider: string;
+  providers: Record<string, AIProviderSettings>;
+  primary_model?: AIPrimaryModelSettings;
+}
+
 export interface AppSettings {
   theme: 'light' | 'dark' | 'sakura';
   language: 'zh-CN' | 'en-US';
@@ -37,22 +60,7 @@ export interface AppSettings {
     connectionTimeout: number;
     maxRetries: number;
   };
-  // 新增：AI设置
-  ai: {
-    currentProvider: string; // 当前选择的AI提供商
-    providers: {
-      [key: string]: {
-        name: string;
-        apiKey: string;
-        model: string;
-        baseUrl: string;
-        // 代理设置
-        useProxy: boolean;
-        proxyType: 'http' | 'https' | 'socks5';
-        proxyUrl: string;
-      };
-    };
-  };
+  ai: AISettings;
 }
 
 export class SettingsManager extends EventEmitter<AppSettings> {
@@ -194,6 +202,7 @@ export class SettingsManager extends EventEmitter<AppSettings> {
         localSettings,
         backendSettings
       ) as AppSettings;
+      this.settings = this.normalizeAISettings(this.settings);
 
       this.syncAIServiceCache(false);
 
@@ -246,6 +255,8 @@ export class SettingsManager extends EventEmitter<AppSettings> {
    */
   async saveSettings(): Promise<void> {
     try {
+      this.settings = this.normalizeAISettings(this.settings);
+
       // 保存到本地存储
       this.saveToLocalStorage();
       
@@ -348,7 +359,9 @@ export class SettingsManager extends EventEmitter<AppSettings> {
    * 更新设置（使用深度合并，避免嵌套对象被覆盖）
    */
   updateSettings(updates: Partial<AppSettings>): void {
-    this.settings = this.deepMerge(this.settings, updates) as AppSettings;
+    this.settings = this.normalizeAISettings(
+      this.deepMerge(this.settings, updates) as AppSettings
+    );
   }
 
   /**
@@ -388,10 +401,12 @@ export class SettingsManager extends EventEmitter<AppSettings> {
 
       // 验证设置格式
       if (this.validateSettings(importedSettings)) {
-        this.settings = this.deepMerge(
-          this.getDefaultSettings(),
-          importedSettings
-        ) as AppSettings;
+        this.settings = this.normalizeAISettings(
+          this.deepMerge(
+            this.getDefaultSettings(),
+            importedSettings
+          ) as AppSettings
+        );
         return true;
       }
 
@@ -426,6 +441,231 @@ export class SettingsManager extends EventEmitter<AppSettings> {
 
       return prev;
     }, {});
+  }
+
+  private normalizeAISettings(settings: AppSettings): AppSettings {
+    const ai = settings.ai || this.getDefaultSettings().ai;
+    const mergedProviders = this.mergeProviderSettings(ai.providers || {});
+    const resolvedPrimaryProvider = this.resolvePrimaryProviderStorageKey(
+      ai.primary_model?.provider,
+      ai.currentProvider
+    );
+    const cachedConfig = aiService.getConfig();
+    const cachedProviderKey = this.resolveCachedProviderStorageKey(cachedConfig?.provider, ai.currentProvider);
+
+    const explicitProviderKeys = Object.keys(mergedProviders).filter((key) => {
+      const providerConfig = mergedProviders[key];
+      return providerConfig ? this.hasExplicitProviderConfig(key, providerConfig) : false;
+    });
+
+    if (explicitProviderKeys.length === 0 && cachedConfig && cachedProviderKey && (cachedConfig.apiKey || cachedConfig.provider === 'ollama')) {
+      mergedProviders[cachedProviderKey] = {
+        ...(mergedProviders[cachedProviderKey] || this.createProviderSettings(cachedProviderKey)),
+        name: cachedConfig.name || this.getProviderDisplayName(cachedProviderKey),
+        apiKey: cachedConfig.apiKey || '',
+        model: cachedConfig.model || '',
+        baseUrl: cachedConfig.baseUrl || '',
+        useProxy: cachedConfig.useProxy || false,
+        proxyType: cachedConfig.proxyType || 'http',
+        proxyUrl: cachedConfig.proxyUrl || '',
+      };
+    }
+
+    const primaryProviderKey = resolvedPrimaryProvider || ai.currentProvider || '';
+    const currentProvider = this.resolvePreferredProvider(
+      primaryProviderKey,
+      mergedProviders,
+      cachedProviderKey
+    );
+    const activeProviderConfig = mergedProviders[currentProvider] || this.createProviderSettings(currentProvider);
+
+    mergedProviders[currentProvider] = {
+      ...activeProviderConfig,
+      name: activeProviderConfig.name || this.getProviderDisplayName(currentProvider),
+      model: primaryProviderKey === currentProvider ? (ai.primary_model?.model ?? activeProviderConfig.model) : activeProviderConfig.model,
+      baseUrl: primaryProviderKey === currentProvider ? (ai.primary_model?.base_url ?? activeProviderConfig.baseUrl) : activeProviderConfig.baseUrl,
+      apiKey: primaryProviderKey === currentProvider ? (ai.primary_model?.api_key ?? activeProviderConfig.apiKey) : activeProviderConfig.apiKey,
+    };
+
+    settings.ai = {
+      currentProvider,
+      providers: mergedProviders,
+      primary_model: this.buildPrimaryModelSettings(
+        currentProvider,
+        mergedProviders[currentProvider]
+      ),
+    };
+
+    return settings;
+  }
+
+  private mergeProviderSettings(providers: Record<string, Partial<AIProviderSettings>>): Record<string, AIProviderSettings> {
+    const defaultProviders = this.getDefaultSettings().ai.providers;
+    const mergedProviders: Record<string, AIProviderSettings> = {};
+
+    Object.entries(defaultProviders).forEach(([key, config]) => {
+      mergedProviders[key] = {
+        ...config,
+        ...(providers[key] || {}),
+      };
+    });
+
+    Object.entries(providers).forEach(([key, config]) => {
+      mergedProviders[key] = {
+        ...(mergedProviders[key] || this.createProviderSettings(key)),
+        ...config,
+        name: config.name || mergedProviders[key]?.name || this.getProviderDisplayName(key),
+      };
+    });
+
+    return mergedProviders;
+  }
+
+  private buildPrimaryModelSettings(providerKey: string, config: AIProviderSettings | undefined): AIPrimaryModelSettings {
+    const resolvedConfig = config || this.createProviderSettings(providerKey);
+    const mappedProvider = this.mapProviderKeyToType(providerKey);
+
+    return {
+      provider: mappedProvider,
+      model: resolvedConfig.model || '',
+      api_key: resolvedConfig.apiKey || undefined,
+      base_url: resolvedConfig.baseUrl || undefined,
+    };
+  }
+
+  private createProviderSettings(key: string): AIProviderSettings {
+    const defaultProvider = this.getDefaultSettings().ai.providers[key];
+    if (defaultProvider) {
+      return { ...defaultProvider };
+    }
+
+    return {
+      name: this.getProviderDisplayName(key),
+      apiKey: '',
+      model: '',
+      baseUrl: '',
+      useProxy: false,
+      proxyType: 'http',
+      proxyUrl: '',
+    };
+  }
+
+  private getProviderDisplayName(key: string): string {
+    const normalizedKey = key.trim().toLowerCase();
+
+    switch (normalizedKey) {
+      case 'openai':
+        return 'OpenAI';
+      case 'deepseek':
+        return 'DeepSeek';
+      case 'claude':
+        return 'Claude';
+      case 'qwen':
+        return 'Qwen';
+      case 'ollama':
+        return 'Ollama';
+      case 'custom':
+        return '自定义 API';
+      default:
+        return key || '自定义模型';
+    }
+  }
+
+  private resolvePrimaryProviderStorageKey(primaryProvider: string | undefined, currentProvider: string | undefined): string {
+    const normalizedPrimaryProvider = String(primaryProvider || '').trim().toLowerCase();
+
+    if (!normalizedPrimaryProvider) {
+      return currentProvider || '';
+    }
+
+    if (['openai', 'deepseek', 'claude', 'ollama', 'qwen', 'custom'].includes(normalizedPrimaryProvider)) {
+      if (normalizedPrimaryProvider === 'custom' && currentProvider && !this.isPresetProvider(currentProvider)) {
+        return currentProvider;
+      }
+      return normalizedPrimaryProvider;
+    }
+
+    if (currentProvider && !this.isPresetProvider(currentProvider)) {
+      return currentProvider;
+    }
+
+    return 'custom';
+  }
+
+  private resolveCachedProviderStorageKey(provider: string | undefined, currentProvider: string | undefined): string {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+
+    if (!normalizedProvider) {
+      return '';
+    }
+
+    if (normalizedProvider !== 'custom') {
+      return normalizedProvider;
+    }
+
+    if (currentProvider && !this.isPresetProvider(currentProvider)) {
+      return currentProvider;
+    }
+
+    return 'custom';
+  }
+
+  private resolvePreferredProvider(
+    primaryProviderKey: string,
+    providers: Record<string, AIProviderSettings>,
+    cachedProviderKey: string
+  ): string {
+    const candidates = [
+      primaryProviderKey,
+      ...Object.keys(providers),
+      cachedProviderKey,
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      const providerConfig = providers[candidate];
+      if (providerConfig && this.hasExplicitProviderConfig(candidate, providerConfig)) {
+        return candidate;
+      }
+    }
+
+    return primaryProviderKey || cachedProviderKey || 'openai';
+  }
+
+  private hasExplicitProviderConfig(key: string, config: AIProviderSettings): boolean {
+    const defaultConfig = this.getDefaultProviderConfig(key);
+    const providerType = this.mapProviderKeyToType(key);
+
+    if (providerType === 'ollama') {
+      return Boolean(
+        config.model !== defaultConfig.model
+        || config.baseUrl !== defaultConfig.baseUrl
+        || config.useProxy
+        || config.proxyUrl
+      );
+    }
+
+    return Boolean(config.apiKey.trim());
+  }
+
+  private getDefaultProviderConfig(key: string): Pick<AIProviderSettings, 'model' | 'baseUrl'> {
+    switch (key) {
+      case 'openai':
+        return { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' };
+      case 'deepseek':
+        return { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' };
+      case 'claude':
+        return { model: 'claude-3-5-sonnet-latest', baseUrl: 'https://api.anthropic.com/v1' };
+      case 'qwen':
+        return { model: 'qwen-turbo', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' };
+      case 'ollama':
+        return { model: 'llama3.1', baseUrl: 'http://localhost:11434/api' };
+      default:
+        return { model: '', baseUrl: '' };
+    }
+  }
+
+  private isPresetProvider(key: string): boolean {
+    return ['openai', 'deepseek', 'claude', 'ollama', 'qwen', 'custom'].includes(key);
   }
 
   /**

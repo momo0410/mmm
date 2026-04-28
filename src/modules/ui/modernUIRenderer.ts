@@ -431,12 +431,9 @@ export class ModernUIRenderer {
                     <option value="JetBrains Mono">JetBrains Mono</option>
                 </select>
             </div>
-            <div class="settings-field">
-                <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">字体大小</label>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <input type="range" id="dropdown-font-size" min="10" max="24" step="1" value="14" style="flex: 1; accent-color: var(--accent-color);" oninput="document.getElementById('dropdown-font-size-value').textContent = this.value + 'px'; window.app?.modernUIRenderer?.applyDropdownFontSize?.(this.value)" />
-                    <span id="dropdown-font-size-value" style="font-size: 12px; color: var(--text-primary); min-width: 36px; text-align: right;">14px</span>
-                </div>
+            <div class="settings-field" style="display: flex; gap: 8px;">
+                <button type="button" class="modern-btn primary" style="flex: 1; padding: 8px; font-size: 12px; justify-content: center;" onclick="event.stopPropagation(); window.showSkillsModal?.()">skills管理</button>
+                <button type="button" class="modern-btn primary" style="flex: 1; padding: 8px; font-size: 12px; justify-content: center;" onclick="event.stopPropagation(); window.showKnowledgeBaseModal?.()">本地知识库管理</button>
             </div>
         </div>
 
@@ -1711,6 +1708,105 @@ private renderWorkspaceContent(): string {
     `;
   }
 
+  /**
+   * 渲染 Skills 管理模态框
+   */
+  renderSkillsModal(): string {
+    return `
+      <div id="skills-modal" class="modal-overlay" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      ">
+        <div class="modal-content modern-modal-content" style="max-width: 640px; width: 90vw; max-height: 80vh; display: flex; flex-direction: column;">
+          <div class="modern-modal-header">
+            <div class="header-left">
+                <div class="header-icon-box">
+                    ${Rocket({ theme: 'filled', size: '18', fill: 'currentColor' })}
+                </div>
+                <div class="header-title-group">
+                    <h2>Skills 管理</h2>
+                </div>
+            </div>
+            <button class="close-modal-btn" onclick="window.hideSkillsModal()" title="关闭">
+              ${CloseOne({ theme: 'outline', size: '18', fill: 'currentColor' })}
+            </button>
+          </div>
+
+          <div style="padding: 12px 20px; display: flex; gap: 10px; border-bottom: 1px solid var(--border-color-light);">
+            <button class="modern-btn danger" style="font-size: 12px; padding: 6px 12px;" onclick="window.deleteSelectedSkills()">删除</button>
+            <button class="modern-btn primary" style="font-size: 12px; padding: 6px 12px;" onclick="window.addSkillPrompt()">增加</button>
+          </div>
+
+          <div class="modal-body modern-modal-body" style="overflow-y: auto; flex: 1;">
+            <div id="skills-list-container" style="padding: 12px 0;">
+              <div style="text-align: center; color: var(--text-secondary); padding: 40px;">加载中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * 渲染本地知识库管理模态框
+   */
+  renderKnowledgeBaseModal(): string {
+    return `
+      <div id="knowledge-base-modal" class="modal-overlay" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      ">
+        <div class="modal-content modern-modal-content" style="max-width: 640px; width: 90vw; max-height: 80vh; display: flex; flex-direction: column;">
+          <div class="modern-modal-header">
+            <div class="header-left">
+                <div class="header-icon-box">
+                    ${BookOpen({ theme: 'filled', size: '18', fill: 'currentColor' })}
+                </div>
+                <div class="header-title-group">
+                    <h2>本地知识库管理</h2>
+                </div>
+            </div>
+            <button class="close-modal-btn" onclick="window.hideKnowledgeBaseModal()" title="关闭">
+              ${CloseOne({ theme: 'outline', size: '18', fill: 'currentColor' })}
+            </button>
+          </div>
+
+          <div style="padding: 12px 20px; display: flex; gap: 10px; border-bottom: 1px solid var(--border-color-light);">
+            <button class="modern-btn danger" style="font-size: 12px; padding: 6px 12px;" onclick="window.deleteSelectedKnowledgeBase()">删除</button>
+            <button class="modern-btn primary" style="font-size: 12px; padding: 6px 12px;" onclick="window.addKnowledgeBasePrompt()">增加</button>
+          </div>
+
+          <div class="modal-body modern-modal-body" style="overflow-y: auto; flex: 1;">
+            <div id="knowledge-base-list-container" style="padding: 12px 0;">
+              <div style="text-align: center; color: var(--text-secondary); padding: 40px;">加载中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   /**
    * 渲染服务器列表
@@ -3118,6 +3214,43 @@ private renderWorkspaceContent(): string {
             border-radius: var(--border-radius-lg);
             padding: var(--spacing-lg);
           ">
+            <div class="setting-item" style="margin-bottom: var(--spacing-xl);">
+              <div style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: var(--spacing-sm);
+                margin-bottom: 8px;
+                flex-wrap: wrap;
+              ">
+                <label style="
+                  font-size: 14px;
+                  font-weight: 600;
+                  color: var(--text-primary);
+                  display: block;
+                ">已配置模型</label>
+                <span id="configured-models-count" style="
+                  padding: 4px 10px;
+                  border-radius: 999px;
+                  background: var(--bg-primary);
+                  border: 1px solid var(--border-color);
+                  color: var(--text-secondary);
+                  font-size: 12px;
+                  font-weight: 600;
+                ">0 个</span>
+              </div>
+              <p style="
+                margin: 0 0 12px 0;
+                color: var(--text-secondary);
+                font-size: 13px;
+                line-height: 1.6;
+              ">这里会显示已保存的模型详情。点击“切换并编辑”可快速切到下方表单，调整后保存即可生效。</p>
+              <div id="configured-models-list" style="
+                display: grid;
+                gap: 12px;
+              "></div>
+            </div>
+
             <div class="setting-item" style="margin-bottom: var(--spacing-lg);">
               <label style="
                 font-size: 14px;
