@@ -35,23 +35,23 @@ jobs:
           mapfile -t benchmark_files < <(find tests -type f \( -name '*benchmark*.py' -o -path '*/benchmarks/*.py' \) | sort)
 
           if [ "${#benchmark_files[@]}" -eq 0 ]; then
-            python -c "
-            import json
-            from pathlib import Path
+            python - <<'PY'
+import json
+from pathlib import Path
 
-            payload = {
-                'benchmarks': [],
-                'metadata': {
-                    'skipped': True,
-                    'reason': 'No benchmark tests defined in src-python/tests',
-                },
-            }
-            Path('benchmark-results.json').write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding='utf-8',
-            )
-            print('No benchmark tests found; wrote skip artifact.')
-            "
+payload = {
+    'benchmarks': [],
+    'metadata': {
+        'skipped': True,
+        'reason': 'No benchmark tests defined in src-python/tests',
+    },
+}
+Path('benchmark-results.json').write_text(
+    json.dumps(payload, ensure_ascii=False, indent=2),
+    encoding='utf-8',
+)
+print('No benchmark tests found; wrote skip artifact.')
+PY
             exit 0
           fi
 
@@ -65,38 +65,38 @@ jobs:
       - name: Validate benchmark results
         working-directory: src-python
         run: |
-          python -c "
-          import json
-          from pathlib import Path
-          import sys
+          python - <<'PY'
+import json
+from pathlib import Path
+import sys
 
-          path = Path('benchmark-results.json')
-          if not path.exists():
-              print('ERROR: benchmark-results.json not found')
-              sys.exit(1)
+path = Path('benchmark-results.json')
+if not path.exists():
+    print('ERROR: benchmark-results.json not found')
+    sys.exit(1)
 
-          with path.open('r', encoding='utf-8') as f:
-              results = json.load(f)
+with path.open('r', encoding='utf-8') as f:
+    results = json.load(f)
 
-          metadata = results.get('metadata', {})
-          benches = results.get('benchmarks', [])
-          if metadata.get('skipped'):
-              print(f\"Benchmark suite skipped: {metadata.get('reason', 'no reason provided')}\")
-              sys.exit(0)
+metadata = results.get('metadata', {})
+benches = results.get('benchmarks', [])
+if metadata.get('skipped'):
+    print(f"Benchmark suite skipped: {metadata.get('reason', 'no reason provided')}")
+    sys.exit(0)
 
-          if not benches:
-              print('Benchmark suite completed without benchmark samples')
-              sys.exit(0)
+if not benches:
+    print('Benchmark suite completed without benchmark samples')
+    sys.exit(0)
 
-          print('Benchmark results generated successfully')
-          print(f'Total benchmarks: {len(benches)}')
+print('Benchmark results generated successfully')
+print(f'Total benchmarks: {len(benches)}')
 
-          for bench in benches:
-              name = bench.get('name', 'unknown')
-              mean_ms = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
-              std_ms = float(bench.get('stats', {}).get('stddev', 0.0)) * 1000.0
-              print(f'  {name}: mean={mean_ms:.2f}ms, std={std_ms:.2f}ms')
-          "
+for bench in benches:
+    name = bench.get('name', 'unknown')
+    mean_ms = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
+    std_ms = float(bench.get('stats', {}).get('stddev', 0.0)) * 1000.0
+    print(f'  {name}: mean={mean_ms:.2f}ms, std={std_ms:.2f}ms')
+PY
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
@@ -117,53 +117,53 @@ jobs:
 
       - name: Check performance thresholds
         run: |
-          python -c "
-          import json
-          from pathlib import Path
-          import sys
-          
-          THRESHOLDS = {
-              'test_orchestrator_basic': 5000,  # ms
-              'test_planner_rule_based': 1000,
-              'test_executor_sequential': 3000,
-          }
+          python - <<'PY'
+import json
+from pathlib import Path
+import sys
 
-          path = Path('benchmark-results.json')
-          if not path.exists():
-              print('ERROR: benchmark-results.json not found')
-              sys.exit(1)
+THRESHOLDS = {
+    'test_orchestrator_basic': 5000,  # ms
+    'test_planner_rule_based': 1000,
+    'test_executor_sequential': 3000,
+}
 
-          with path.open('r', encoding='utf-8') as f:
-              results = json.load(f)
+path = Path('benchmark-results.json')
+if not path.exists():
+    print('ERROR: benchmark-results.json not found')
+    sys.exit(1)
 
-          metadata = results.get('metadata', {})
-          benches = results.get('benchmarks', [])
-          if metadata.get('skipped'):
-              print(f\"Skipping threshold check: {metadata.get('reason', 'no reason provided')}\")
-              sys.exit(0)
+with path.open('r', encoding='utf-8') as f:
+    results = json.load(f)
 
-          if not benches:
-              print('No benchmark samples available; threshold check skipped')
-              sys.exit(0)
+metadata = results.get('metadata', {})
+benches = results.get('benchmarks', [])
+if metadata.get('skipped'):
+    print(f"Skipping threshold check: {metadata.get('reason', 'no reason provided')}")
+    sys.exit(0)
 
-          failed = []
-          for bench in benches:
-              name = bench.get('name', '')
-              mean_ms = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
+if not benches:
+    print('No benchmark samples available; threshold check skipped')
+    sys.exit(0)
 
-              for pattern, threshold in THRESHOLDS.items():
-                  if pattern in name and mean_ms > threshold:
-                      failed.append(f'{name}: {mean_ms:.1f}ms > {threshold}ms')
+failed = []
+for bench in benches:
+    name = bench.get('name', '')
+    mean_ms = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
 
-          if failed:
-              print('Performance regression detected:')
-              for f in failed:
-                  print(f'  - {f}')
-              sys.exit(1)
+    for pattern, threshold in THRESHOLDS.items():
+        if pattern in name and mean_ms > threshold:
+            failed.append(f'{name}: {mean_ms:.1f}ms > {threshold}ms')
 
-          print('All benchmarks within thresholds')
-          sys.exit(0)
-          "
+if failed:
+    print('Performance regression detected:')
+    for item in failed:
+        print(f'  - {item}')
+    sys.exit(1)
+
+print('All benchmarks within thresholds')
+sys.exit(0)
+PY
 
   benchmark-report:
     runs-on: ubuntu-22.04
@@ -183,25 +183,27 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "benchmark-results.json" ]; then
-            python -c "
-            import json
-            with open('benchmark-results.json', 'r') as f:
-                results = json.load(f)
-            metadata = results.get('metadata', {})
-            benches = results.get('benchmarks', [])
-            if metadata.get('skipped'):
-                print(f\"Benchmark suite skipped: {metadata.get('reason', 'no reason provided')}\")
-            elif not benches:
-                print('No benchmark samples available')
-            else:
-                print('| Benchmark | Mean (ms) | Stddev (ms) |')
-                print('|-----------|-----------|-------------|')
-                for bench in benches:
-                    name = bench.get('name', 'unknown')
-                    mean = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
-                    std = float(bench.get('stats', {}).get('stddev', 0.0)) * 1000.0
-                    print(f'| {name} | {mean:.2f} | {std:.2f} |')
-            " >> $GITHUB_STEP_SUMMARY
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+import json
+
+with open('benchmark-results.json', 'r', encoding='utf-8') as f:
+    results = json.load(f)
+
+metadata = results.get('metadata', {})
+benches = results.get('benchmarks', [])
+if metadata.get('skipped'):
+    print(f"Benchmark suite skipped: {metadata.get('reason', 'no reason provided')}")
+elif not benches:
+    print('No benchmark samples available')
+else:
+    print('| Benchmark | Mean (ms) | Stddev (ms) |')
+    print('|-----------|-----------|-------------|')
+    for bench in benches:
+        name = bench.get('name', 'unknown')
+        mean = float(bench.get('stats', {}).get('mean', 0.0)) * 1000.0
+        std = float(bench.get('stats', {}).get('stddev', 0.0)) * 1000.0
+        print(f'| {name} | {mean:.2f} | {std:.2f} |')
+PY
           else
             echo "No benchmark results available" >> $GITHUB_STEP_SUMMARY
           fi
