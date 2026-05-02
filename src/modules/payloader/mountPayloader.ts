@@ -42,3 +42,20 @@ export function unmountPayloader() {
     console.error('❌ Payloader 卸载失败:', error);
   }
 }
+
+export function showPayloader() {
+  const container = document.getElementById('payloader-vue-root');
+  if (container) {
+    container.style.display = '';
+    if (!appInstance) {
+      mountPayloader();
+    }
+  }
+}
+
+export function hidePayloader() {
+  const container = document.getElementById('payloader-vue-root');
+  if (container) {
+    container.style.display = 'none';
+  }
+}

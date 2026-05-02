@@ -41,29 +41,20 @@ jobs:
         working-directory: src-python
         run: |
           pip install mypy
-          mypy app/services/agent/ --ignore-missing-imports --no-error-summary || true
+          mypy app/ --ignore-missing-imports --no-error-summary || true
 
-      - name: Run unit tests
+      - name: Run backend tests
         working-directory: src-python
         run: |
-          pytest tests/agent/unit/ -v --tb=short \
-            --cov=app/services/agent \
-            --cov-report=xml:coverage-unit.xml \
+          pytest tests -v --tb=short \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
             --cov-report=term-missing
-
-      - name: Run integration tests
-        working-directory: src-python
-        run: |
-          pytest tests/agent/integration/ -v --tb=short \
-            --cov=app/services/agent \
-            --cov-report=xml:coverage-integration.xml \
-            --cov-report=term-missing \
-            --cov-append
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: src-python/coverage-unit.xml,src-python/coverage-integration.xml
+          files: src-python/coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 

@@ -5,47 +5,35 @@
 
 import type { SystemInfo } from '../ssh/sshManager';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
-import apexchartsScriptUrl from '../../assets/js/apexcharts.min.js?url';
+import { SystemDetector } from '../utils/systemDetector';
 import {
-  Computer,
-  TrendTwo,
   LinkOne,
-  SettingTwo,
-  Peoples,
   Dashboard as DashboardIcon,
   Refresh
 } from '@icon-park/svg';
 
 export class DashboardRenderer {
-  private charts: Map<string, any> = new Map();
-  private currentTheme: string = 'dark';
-  private history: {
-    cpu: { x: number; y: number }[];
-    memory: { x: number; y: number }[];
-    network: { rx: { x: number; y: number }[]; tx: { x: number; y: number }[] };
-  } = {
-      cpu: [],
-      memory: [],
-      network: { rx: [], tx: [] }
-    };
-  private lastNetworkData: { rx: number; tx: number; timestamp: number } | null = null;
-  private currentSystemInfo?: SystemInfo;
-  private isTopProcessesLoading = false;
-  private topProcessesCache: Array<{ pid: string; user: string; cpu: string; memory: string; command: string }> | null = null;
-  private topProcessesCacheTime: number = 0;
-  private readonly TOP_PROCESSES_CACHE_TTL = 5000;
-  private apexChartsLoadPromise: Promise<boolean> | null = null;
+  private static readonly HISTORY_MAX = 20;
+
+  private systemMetaCache: {
+    os: string;
+    kernel: string;
+    arch: string;
+    virtualization: string;
+    timezone: string;
+  } | null = null;
+
+  private memoryHistory: number[] = [];
+  private diskHistory: number[] = [];
 
   constructor() {
     (window as any).dashboardRendererInstance = this;
-    (window as any).updateDashboardTopProcesses = this.updateTopProcesses.bind(this);
   }
 
   /**
    * 渲染系统信息仪表盘
    */
-  renderDashboard(systemInfo?: SystemInfo, theme: string = 'dark'): string {
-    this.currentTheme = theme;
+  renderDashboard(systemInfo?: SystemInfo, _theme: string = 'dark'): string {
     const isConnected = sshConnectionManager.isConnected();
 
     if (!isConnected) {
@@ -55,589 +43,409 @@ export class DashboardRenderer {
       return this.renderConnectedButNoData();
     }
 
-    this.updateHistory(systemInfo);
-
-    // 延迟初始化图表和 Top Processes（等待 DOM 插入）
     setTimeout(() => {
-      this.initCharts(false);
-      if ((window as any).updateDashboardTopProcesses) {
-        (window as any).updateDashboardTopProcesses(false);
-      }
+      this.detectAndShowSystemType();
+      this.loadSystemMeta();
     }, 100);
 
-    return `
-      <div class="dashboard-container">
-        <div class="dashboard-header">
-          <div class="header-left">
-            <div class="header-icon">
-              ${this.renderDashboardPanelIcon(24)}
-            </div>
-            <div class="header-info">
-              <h2>系统监控仪表盘</h2>
-              <div class="last-update">
-                <span>最后更新: ${this.formatTime(systemInfo.lastUpdate)}</span>
-                <span class="separator">•</span>
-                <span>自动刷新: 30秒</span>
-              </div>
-            </div>
-          </div>
-          <button class="modern-btn secondary refresh-btn" onclick="window.loadSystemDetailedInfo(true)">
-            ${Refresh({ theme: 'outline', size: '14', fill: 'currentColor' })}
-            <span>刷新数据</span>
-          </button>
-        </div>
-
-        <!-- 关键指标概览 (Top Row) -->
-        <div class="metrics-overview">
-          ${this.renderMetricCard('CPU使用率', this.getCpuUsage(systemInfo), '%', 'warning')}
-          ${this.renderMetricCard('内存使用率', this.getMemoryUsage(systemInfo), '%', 'primary')}
-          ${this.renderMetricCard('磁盘使用率', this.getDiskUsage(systemInfo), '%', 'error')}
-          ${this.renderMetricCard('网络连接', systemInfo.networkConnections.toString(), '个', 'success')}
-        </div>
-
-        <!-- Bento Grid Layout -->
-        <div class="dashboard-grid-bento">
-          
-          <!-- Row 1: Disk Space Detailed & Load -->
-          <div class="dashboard-card modern-card chart-disk">
-            <div class="card-header">
-              <div class="card-icon purple">
-                ${Computer({ theme: 'filled', size: '18', fill: 'currentColor' })}
-              </div>
-              <h3>磁盘空间分布</h3>
-            </div>
-            <div class="card-content partition-list-content">
-              ${this.renderPartitionList(systemInfo)}
-            </div>
-          </div>
-
-          <div class="dashboard-card modern-card chart-load">
-            <div class="card-header">
-              <div class="card-icon orange">
-                ${SettingTwo({ theme: 'filled', size: '18', fill: 'currentColor' })}
-              </div>
-              <h3>系统负载</h3>
-            </div>
-            <div class="card-content chart-container">
-              <div id="chart-load" class="load-chart"></div>
-            </div>
-          </div>
-
-          <!-- Row 2: Top Processes & Overview -->
-          <div class="dashboard-card modern-card top-processes-card">
-             <div class="card-header">
-              <div class="card-icon blue">
-                ${TrendTwo({ theme: 'filled', size: '18', fill: 'currentColor' })}
-              </div>
-              <h3>实时 Top 进程 (CPU)</h3>
-            </div>
-            <div class="card-content table-container" style="overflow-x: auto;">
-              ${this.renderTopProcessesTable(systemInfo)}
-            </div>
-          </div>
-
-          <div class="dashboard-card modern-card system-overview-card">
-             <div class="card-header">
-              <div class="card-icon secondary">
-                ${Peoples({ theme: 'filled', size: '18', fill: 'currentColor' })}
-              </div>
-              <h3>系统概览</h3>
-            </div>
-            <div class="card-content">
-               <div class="info-list">
-                <div class="info-item">
-                  <span class="label">主机名</span>
-                  <span class="value">${systemInfo.hostname}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">运行时间</span>
-                  <span class="value">${systemInfo.uptime}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">CPU型号</span>
-                  <span class="value" title="${systemInfo.cpuInfo.model}">
-                    ${systemInfo.cpuInfo.model}
-                  </span>
-                </div>
-                 <div class="info-item">
-                  <span class="label">核心数</span>
-                  <span class="value">${systemInfo.cpuInfo.cores} 核</span>
-                </div>
-                 <div class="info-item">
-                  <span class="label">进程数</span>
-                  <span class="value">${systemInfo.processCount}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    `;
-  }
-
-  /**
-   * 渲染 Top 进程表
-   */
-  private renderTopProcessesTable(systemInfo: SystemInfo): string {
-    if (!systemInfo.detailedInfo || !systemInfo.detailedInfo.processes || systemInfo.detailedInfo.processes.length === 0) {
-      return this.renderTopProcessesPlaceholder();
-    }
-
-    const processes = [...systemInfo.detailedInfo.processes]
-      .sort((a, b) => parseFloat(b.cpu) - parseFloat(a.cpu))
-      .slice(0, 6);
-
-    return this.renderTopProcessesHTML(processes);
-  }
-
-  /**
-   * 渲染 Top Processes 占位符（loading 状态）
-   */
-  private renderTopProcessesPlaceholder(): string {
-    return `
-      <div class="top-processes-loading" style="display: flex; align-items: center; justify-content: center; padding: 20px; color: var(--text-secondary);">
-        <div style="text-align: center;">
-          <div style="font-size: 20px; margin-bottom: 8px;">⏳</div>
-          <div style="font-size: 13px;">正在加载进程数据...</div>
-        </div>
-      </div>
-    `;
-  }
-
-  /**
-   * 渲染 Top Processes HTML
-   */
-  private renderTopProcessesHTML(processes: Array<{ pid: string; user: string; cpu: string; memory: string; command: string }>): string {
-    return `
-      <table class="modern-table" style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
-        <thead>
-          <tr style="border-bottom: 1px solid var(--border-color); text-align: left;">
-            <th style="padding: 8px;">PID</th>
-            <th style="padding: 8px;">用户</th>
-            <th style="padding: 8px;">CPU</th>
-            <th style="padding: 8px;">内存</th>
-            <th style="padding: 8px;">命令</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${processes.map(p => `
-            <tr style="border-bottom: 1px solid var(--border-color-light);">
-              <td style="padding: 8px;">${p.pid}</td>
-              <td style="padding: 8px;">${p.user}</td>
-              <td style="padding: 8px; color: var(--warning-color);">${p.cpu}%</td>
-              <td style="padding: 8px;">${p.memory}%</td>
-              <td style="padding: 8px;" title="${p.command}">${this.truncateText(p.command, 25)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  }
-
-  /**
-   * 异步更新 Top Processes（局部更新，不重渲染整个 dashboard）
-   */
-  async updateTopProcesses(forceRefresh: boolean = false): Promise<void> {
-    const now = Date.now();
-    
-    if (!forceRefresh && this.topProcessesCache && (now - this.topProcessesCacheTime) < this.TOP_PROCESSES_CACHE_TTL) {
-      console.log('📋 使用 Top Processes 缓存');
-      this.renderTopProcessesToDOM(this.topProcessesCache);
-      return;
-    }
-
-    if (this.isTopProcessesLoading) {
-      console.log('⏳ Top Processes 正在加载中...');
-      return;
-    }
-
-    this.isTopProcessesLoading = true;
-    console.log('🔄 开始异步加载 Top Processes...');
-
-    try {
-      const app = (window as any).app;
-      if (!app || !app.sshManager) {
-        console.warn('⚠️ 无法获取 SSH 管理器');
-        return;
-      }
-
-      const tabData = await app.sshManager.fetchTabDetail('processes', forceRefresh);
-      const processes = tabData?.processes || [];
-      
-      const sorted = [...processes]
-        .sort((a: any, b: any) => parseFloat(b.cpu) - parseFloat(a.cpu))
-        .slice(0, 6);
-
-      this.topProcessesCache = sorted;
-      this.topProcessesCacheTime = now;
-      
-      this.renderTopProcessesToDOM(sorted);
-      console.log('✅ Top Processes 更新完成');
-
-    } catch (error) {
-      console.error('❌ 更新 Top Processes 失败:', error);
-    } finally {
-      this.isTopProcessesLoading = false;
-    }
-  }
-
-  /**
-   * 将 Top Processes 渲染到 DOM（局部更新）
-   */
-  private renderTopProcessesToDOM(processes: Array<{ pid: string; user: string; cpu: string; memory: string; command: string }>): void {
-    const tableContainer = document.querySelector('.top-processes-card .table-container');
-    if (!tableContainer) {
-      console.warn('⚠️ 未找到 Top Processes 容器');
-      return;
-    }
-
-    const html = this.renderTopProcessesHTML(processes);
-    tableContainer.innerHTML = html;
-  }
-
-  /**
-   * 局部更新指标卡片（避免整页重渲染）
-   */
-  public updateMetricCards(systemInfo: SystemInfo): void {
-    try {
-      // 更新 CPU 使用率
-      const cpuCard = document.querySelector('.metric-card.warning .metric-value');
-      if (cpuCard) {
-        cpuCard.textContent = this.getCpuUsage(systemInfo);
-      }
-
-      // 更新内存使用率
-      const memCard = document.querySelector('.metric-card.primary .metric-value');
-      if (memCard) {
-        memCard.textContent = this.getMemoryUsage(systemInfo);
-      }
-
-      // 更新磁盘使用率
-      const diskCard = document.querySelector('.metric-card.error .metric-value');
-      if (diskCard) {
-        diskCard.textContent = this.getDiskUsage(systemInfo);
-      }
-
-      // 更新网络连接数
-      const netCard = document.querySelector('.metric-card.success .metric-value');
-      if (netCard) {
-        netCard.textContent = systemInfo.networkConnections.toString();
-      }
-
-      // 更新最后更新时间
-      const lastUpdateEl = document.querySelector('.last-update span:first-child');
-      if (lastUpdateEl) {
-        lastUpdateEl.textContent = `最后更新: ${this.formatTime(systemInfo.lastUpdate)}`;
-      }
-
-      console.log('✅ 指标卡片已局部更新');
-    } catch (error) {
-      console.error('❌ 更新指标卡片失败:', error);
-    }
-  }
-
-  /**
-   * Initialize ApexCharts（仅在必要时创建/重建）
-   */
-  public initCharts(forceRecreate: boolean = false) {
-    console.log('🔍 initCharts 被调用，forceRecreate:', forceRecreate);
-
-    const systemInfo = this.currentSystemInfo;
-    if (!systemInfo) {
-      console.log('⏳ initCharts: 等待系统信息加载...');
-      return;
-    }
-
-    const apex = this.getApexChartsCtor();
-    if (!apex) {
-      console.warn('⚠️ initCharts: ApexCharts 未加载，开始动态加载');
-      this.ensureApexChartsLoaded().then((loaded) => {
-        if (loaded) this.initCharts(forceRecreate);
-      });
-      return;
-    }
-
-    console.log('📊 initCharts: systemInfo 已就绪，loadAverage:', systemInfo.loadAverage);
-
-    if (forceRecreate) {
-      this.destroyAllCharts();
-    }
-
-    const existingChart = this.charts.get('load');
-    const chartEl = document.querySelector("#chart-load") as HTMLElement | null;
-    const chartRoot = existingChart ? ((existingChart as any).el as HTMLElement | undefined) : undefined;
-    const isMountedToCurrentContainer = !!(existingChart && chartEl && chartRoot && chartEl.contains(chartRoot) && document.body.contains(chartRoot));
-
-    if (existingChart && isMountedToCurrentContainer) {
-      console.log('🔄 initCharts: 更新现有图表');
-      this.updateLoadChart(systemInfo);
-      return;
-    }
-
-    if (existingChart && !isMountedToCurrentContainer) {
-      console.log('🧹 initCharts: 检测到旧图表实例，先销毁后重建');
-      this.destroyAllCharts();
-    }
-
-    console.log('🆕 initCharts: 创建新图表');
-    this.initLoadChart();
-  }
-
-  /**
-   * 刷新仪表盘摘要数据（不触发整页重渲染）
-   */
-  public refreshSummaryData(systemInfo: SystemInfo): void {
-    this.currentTheme = (window as any).app?.stateManager?.getState?.()?.theme || this.currentTheme;
-    this.updateHistory(systemInfo);
-    this.updateMetricCards(systemInfo);
-    this.initCharts(false);
-  }
-
-  /**
-   * 销毁所有图表
-   */
-  private destroyAllCharts(): void {
-    this.charts.forEach(chart => {
-      try {
-        chart.destroy();
-      } catch (e) {
-        console.warn('Failed to destroy chart:', e);
-      }
-    });
-    this.charts.clear();
-  }
-
-  private getThemeOptions() {
-    const isDark = this.currentTheme === 'dark';
-    return {
-      mode: isDark ? 'dark' : 'light',
-      textColor: isDark ? '#94a3b8' : '#475569',
-      gridColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-      dataLabelColor: isDark ? '#fff' : '#1e293b'
-    };
-  }
-
-  private initLoadChart() {
-    const systemInfo = this.currentSystemInfo;
-    if (!systemInfo) {
-      console.warn('⚠️ initLoadChart: systemInfo 为空');
-      return;
-    }
-
-    const chartEl = document.querySelector("#chart-load");
-    if (!chartEl) {
-      console.warn('⚠️ initLoadChart: #chart-load 元素不存在');
-      return;
-    }
-
-    const ApexCtor = this.getApexChartsCtor();
-    if (!ApexCtor) {
-      console.warn('⚠️ initLoadChart: ApexCharts 未加载');
-      return;
-    }
-
-    const themeOpts = this.getThemeOptions();
-    const load = this.getLoadPercentages(systemInfo);
-    
-    console.log('📊 初始化负载图表，数据:', load);
-
-    const options = {
-      series: [{ name: '负载', data: load }],
-      chart: { type: 'bar', height: '100%', fontFamily: 'inherit', background: 'transparent', toolbar: { show: false } },
-      colors: ['#8B5CF6'],
-      plotOptions: { bar: { borderRadius: 4, horizontal: false, columnWidth: '40%', distributed: true } },
-      xaxis: {
-        categories: ['1 分钟', '5 分钟', '15 分钟'],
-        axisBorder: { show: false },
-        axisTicks: { show: false },
-        labels: { style: { colors: themeOpts.textColor } }
-      },
-      yaxis: { show: false, min: 0, max: 100 },
-      grid: { show: false },
-      dataLabels: {
-        enabled: true,
-        style: { colors: [themeOpts.dataLabelColor] },
-        offsetY: -20,
-        formatter: (value: number) => `${value.toFixed(1)}%`
-      },
-      tooltip: {
-        y: {
-          formatter: (value: number) => `${value.toFixed(1)}%`
-        }
-      },
-      theme: { mode: themeOpts.mode },
-      legend: { show: false }
-    };
-    
-    try {
-      const chart = new ApexCtor(chartEl, options);
-      chart.render();
-      this.charts.set('load', chart);
-      console.log('✅ 负载图表初始化成功');
-    } catch (error) {
-      console.error('❌ 初始化负载图表失败:', error);
-    }
-  }
-
-  /**
-   * 更新负载图表（复用实例，不 destroy/recreate）
-   */
-  private updateLoadChart(systemInfo: SystemInfo): void {
-    const chart = this.charts.get('load');
-    if (!chart) {
-      console.warn('⚠️ 负载图表不存在，跳过更新');
-      return;
-    }
-
-    try {
-      const load = this.getLoadPercentages(systemInfo);
-      // 刷新时关闭动画，仅首次初始化时保留动画
-      chart.updateSeries([{ data: load }], false);
-    } catch (error) {
-      console.error('❌ 更新负载图表失败:', error);
-    }
-  }
-
-  private getApexChartsCtor(): any | null {
-    return (window as any).ApexCharts || null;
-  }
-
-  private ensureApexChartsLoaded(): Promise<boolean> {
-    const existingCtor = this.getApexChartsCtor();
-    if (existingCtor) return Promise.resolve(true);
-    if (this.apexChartsLoadPromise) return this.apexChartsLoadPromise;
-
-    this.apexChartsLoadPromise = new Promise<boolean>((resolve) => {
-      const existingScript = document.querySelector('script[data-lert-apexcharts="1"]') as HTMLScriptElement | null;
-      if (existingScript) {
-        if (this.getApexChartsCtor()) {
-          resolve(true);
-          return;
-        }
-        existingScript.addEventListener('load', () => resolve(!!this.getApexChartsCtor()), { once: true });
-        existingScript.addEventListener('error', () => resolve(false), { once: true });
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = apexchartsScriptUrl;
-      script.async = true;
-      script.defer = true;
-      script.setAttribute('data-lert-apexcharts', '1');
-      script.onload = () => resolve(!!this.getApexChartsCtor());
-      script.onerror = () => {
-        console.error('❌ ApexCharts 脚本加载失败:', apexchartsScriptUrl);
-        resolve(false);
-      };
-      document.head.appendChild(script);
-    });
-
-    return this.apexChartsLoadPromise;
-  }
-
-  private getLoadPercentages(systemInfo: SystemInfo): number[] {
-    const cores = Math.max(1, Number(systemInfo.cpuInfo?.cores) || 1);
-    return systemInfo.loadAverage.map((v: string) => {
-      const loadValue = Number.parseFloat(v);
-      if (!Number.isFinite(loadValue)) return 0;
-      return Math.max(0, Math.min(100, (loadValue / cores) * 100));
-    });
-  }
-
-  private updateHistory(systemInfo: SystemInfo) {
-    const now = new Date().getTime();
-
-    // CPU
     const cpuUsage = parseFloat(this.getCpuUsage(systemInfo));
-    this.history.cpu.push({ x: now, y: cpuUsage });
-    if (this.history.cpu.length > 60) this.history.cpu.shift();
-
-    // Memory
     const memUsage = parseFloat(this.getMemoryUsage(systemInfo));
-    this.history.memory.push({ x: now, y: memUsage });
-    if (this.history.memory.length > 60) this.history.memory.shift();
+    const diskUsage = parseFloat(this.getDiskUsage(systemInfo));
 
-    // Network Speed Calculation
-    let rxSpeed = 0;
-    let txSpeed = 0;
+    this.memoryHistory.push(memUsage);
+    this.diskHistory.push(diskUsage);
+    while (this.memoryHistory.length > DashboardRenderer.HISTORY_MAX) this.memoryHistory.shift();
+    while (this.diskHistory.length > DashboardRenderer.HISTORY_MAX) this.diskHistory.shift();
+    const loadAvg = systemInfo.loadAverage || ['0', '0', '0'];
+    const load1 = parseFloat(loadAvg[0]) || 0;
+    const load5 = parseFloat(loadAvg[1]) || 0;
+    const load15 = parseFloat(loadAvg[2]) || 0;
+    const cores = systemInfo.cpuInfo.cores || 1;
+    const loadPercent = Math.min((load5 / cores) * 100, 100);
+    const meta = this.systemMetaCache || { os: '检测中...' };
 
-    if (this.lastNetworkData && systemInfo.networkInfo) {
-      const timeDiff = (now - this.lastNetworkData.timestamp) / 1000;
-      if (timeDiff > 0) {
-        const rxDiff = systemInfo.networkInfo.rxBytes - this.lastNetworkData.rx;
-        const txDiff = systemInfo.networkInfo.txBytes - this.lastNetworkData.tx;
-        rxSpeed = Math.max(0, rxDiff / 1024 / timeDiff);
-        txSpeed = Math.max(0, txDiff / 1024 / timeDiff);
-      }
-    }
+    return `
+      <div class="dashboard-v3">
+        <div class="dash-v3-header">
+          <div class="dash-v3-header-left">
+            <div class="dash-v3-logo">${DashboardIcon({ theme: 'filled', size: '22', fill: 'currentColor' })}</div>
+            <div class="dash-v3-title-group">
+              <h2 class="dash-v3-title">系统监控仪表盘</h2>
+              <span class="dash-v3-subtitle">最后更新: ${this.formatTime(systemInfo.lastUpdate)}</span>
+            </div>
+            <div class="dash-v3-system-status">
+              <span class="dash-v3-status-dot"></span>
+              <div class="dash-v3-system-status-copy">
+                <span class="dash-v3-system-status-text">已检测到系统:</span>
+                <strong id="dashboard-os-value" title="${meta.os}">${meta.os}</strong>
+              </div>
+            </div>
+          </div>
+          <div class="dash-v3-header-right">
+            <div class="dash-v3-refresh-stack">
+              <button class="dash-v3-refresh-btn" onclick="window.loadSystemDetailedInfo(true)">
+                ${Refresh({ theme: 'outline', size: '14', fill: 'currentColor' })}
+                <span>刷新数据</span>
+              </button>
+              <div class="dash-v3-auto-refresh">
+                <span>自动刷新: <strong>30秒</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-    if (systemInfo.networkInfo) {
-      this.lastNetworkData = {
-        rx: systemInfo.networkInfo.rxBytes,
-        tx: systemInfo.networkInfo.txBytes,
-        timestamp: now
-      };
-    }
+        <div class="dash-v3-info-bar">
+          <div class="dash-v3-info-col">
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">主机名</span>
+              <span class="dash-v3-info-value">${systemInfo.hostname}</span>
+            </div>
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">总内存</span>
+              <span class="dash-v3-info-value">${systemInfo.memoryUsage.total}</span>
+            </div>
+          </div>
+          <div class="dash-v3-info-col">
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">处理器</span>
+              <span class="dash-v3-info-value" title="${systemInfo.cpuInfo.model}">${systemInfo.cpuInfo.model}</span>
+            </div>
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">磁盘总量</span>
+              <span class="dash-v3-info-value">${systemInfo.diskUsage.total}</span>
+            </div>
+          </div>
+          <div class="dash-v3-info-col">
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">核心数</span>
+              <span class="dash-v3-info-value">${systemInfo.cpuInfo.cores}</span>
+            </div>
+            <div class="dash-v3-info-item">
+              <span class="dash-v3-info-label">运行时间</span>
+              <span class="dash-v3-info-value">${systemInfo.uptime}</span>
+            </div>
+          </div>
+        </div>
 
-    this.history.network.rx.push({ x: now, y: rxSpeed });
-    this.history.network.tx.push({ x: now, y: txSpeed });
-    if (this.history.network.rx.length > 60) this.history.network.rx.shift();
-    if (this.history.network.tx.length > 60) this.history.network.tx.shift();
+        <div class="dash-v3-row dash-v3-row-charts">
+          <div class="dash-v3-card">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">CPU使用率</span>
+              <span class="dash-v3-card-value">${cpuUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+            </div>
+            <div class="dash-v3-card-body dash-v3-center">
+              <div class="dash-v3-ring-wrap">
+                <div class="dash-v3-ring" style="--ring-value: ${cpuUsage}; --ring-gradient: linear-gradient(135deg, #22d3ee 0%, #2563eb 52%, #7c3aed 100%);">
+                  <div class="dash-v3-ring-inner">
+                    <span class="dash-v3-ring-value">${cpuUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                    <span class="dash-v3-ring-label">CPU使用率</span>
+                  </div>
+                </div>
+                <div class="dash-v3-mini-bars">
+                  ${this.renderMiniBarChart(this.memoryHistory.slice(-10), '#3b82f6')}
+                </div>
+              </div>
+            </div>
+          </div>
 
-    this.currentSystemInfo = systemInfo;
+          <div class="dash-v3-card">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">磁盘空间分布</span>
+              <span class="dash-v3-card-value">${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
+            </div>
+            <div class="dash-v3-card-body dash-v3-center">
+              <div class="dash-v3-ring" style="--ring-value: ${diskUsage}; --ring-gradient: linear-gradient(135deg, #fde047 0%, #f97316 55%, #ef4444 100%);">
+                <div class="dash-v3-ring-inner">
+                  <span class="dash-v3-ring-value">${diskUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                  <span class="dash-v3-ring-label">使用率</span>
+                </div>
+              </div>
+            </div>
+            <div class="dash-v3-card-footer">
+              <span>可用 ${systemInfo.diskUsage.available}</span>
+              <span>1 分区</span>
+            </div>
+          </div>
 
-    if (this.charts.size > 0) {
-      this.updateCharts(systemInfo);
-    }
+          <div class="dash-v3-card">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">系统负载</span>
+              <span class="dash-v3-card-value">${loadAvg.slice(0, 3).join(' / ')}</span>
+            </div>
+            <div class="dash-v3-card-body dash-v3-center">
+              <div class="dash-v3-ring" style="--ring-value: ${loadPercent}; --ring-gradient: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 55%, #ec4899 100%);">
+                <div class="dash-v3-ring-inner">
+                  <span class="dash-v3-ring-value">${loadPercent.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                  <span class="dash-v3-ring-label">5分钟</span>
+                </div>
+              </div>
+            </div>
+            <div class="dash-v3-card-footer">
+              <span>1分钟 ${load1.toFixed(2)}</span>
+              <span>15分钟 ${load15.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div class="dash-v3-card dash-v3-card-network">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">网络状态</span>
+              <span class="dash-v3-card-value">${systemInfo.networkConnections}<span class="dash-v3-card-unit"> 连接</span></span>
+            </div>
+            <div class="dash-v3-card-body">
+              <div class="dash-v3-net-stats">
+                <div class="dash-v3-net-stat">
+                  <span class="dash-v3-net-label">上传速率</span>
+                  <span class="dash-v3-net-val">--</span>
+                </div>
+                <div class="dash-v3-net-stat">
+                  <span class="dash-v3-net-label">下载速率</span>
+                  <span class="dash-v3-net-val">--</span>
+                </div>
+                <div class="dash-v3-net-stat">
+                  <span class="dash-v3-net-label">响应时间</span>
+                  <span class="dash-v3-net-val">--</span>
+                </div>
+              </div>
+              <div class="dash-v3-net-chart-box">
+                <div class="dash-v3-net-chart-grid"></div>
+                <div class="dash-v3-net-charts">
+                  <div class="dash-v3-net-chart-item">
+                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.memoryHistory.slice(-20), '#22c55e')}</div>
+                    <span class="dash-v3-net-chart-label">下载</span>
+                  </div>
+                  <div class="dash-v3-net-chart-item">
+                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.diskHistory.slice(-20), '#3b82f6')}</div>
+                    <span class="dash-v3-net-chart-label">上传</span>
+                  </div>
+                  <div class="dash-v3-net-chart-item">
+                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.memoryHistory.slice(-20), '#f59e0b')}</div>
+                    <span class="dash-v3-net-chart-label">响应</span>
+                  </div>
+                </div>
+              </div>
+              <div class="dash-v3-net-legend">
+                <div class="dash-v3-net-chart-item">
+                  <span class="dash-v3-net-legend-dot download"></span>
+                  <span class="dash-v3-net-chart-label">下载</span>
+                </div>
+                <div class="dash-v3-net-chart-item">
+                  <span class="dash-v3-net-legend-dot upload"></span>
+                  <span class="dash-v3-net-chart-label">上传</span>
+                </div>
+                <div class="dash-v3-net-chart-item">
+                  <span class="dash-v3-net-legend-dot latency"></span>
+                  <span class="dash-v3-net-chart-label">响应</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dash-v3-row dash-v3-row-lines">
+          <div class="dash-v3-card dash-v3-card-wide">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">内存使用率</span>
+              <span class="dash-v3-card-value">${memUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+            </div>
+            <div class="dash-v3-card-body dash-v3-chart-body">
+              <div class="dash-v3-line-chart-grid" id="chart-memory">
+                ${this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4')}
+              </div>
+              ${this.renderUsageBlocks(memUsage, '#06b6d4')}
+            </div>
+            <div class="dash-v3-card-footer">
+              <span>已用 ${systemInfo.memoryUsage.used}</span>
+              <span>总计 ${systemInfo.memoryUsage.total}</span>
+            </div>
+          </div>
+
+          <div class="dash-v3-card dash-v3-card-wide">
+            <div class="dash-v3-card-header">
+              <span class="dash-v3-card-title">磁盘使用率</span>
+              <span class="dash-v3-card-value">${diskUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+            </div>
+            <div class="dash-v3-card-body dash-v3-chart-body">
+              <div class="dash-v3-line-chart-grid" id="chart-disk-trend">
+                ${this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444')}
+              </div>
+              ${this.renderUsageBlocks(diskUsage, '#ef4444')}
+            </div>
+            <div class="dash-v3-card-footer">
+              <span>已用 ${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
+              <span>可用 ${systemInfo.diskUsage.available}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
-  /**
-   * 更新所有图表（复用实例）
-   */
-  private updateCharts(systemInfo: SystemInfo): void {
-    this.updateLoadChart(systemInfo);
+  private renderMiniBarChart(points: number[], color: string): string {
+    if (!points.length) return '';
+    const barWidth = 4;
+    const gap = 2;
+    const chartWidth = points.length * (barWidth + gap);
+    const height = 20;
+    const max = Math.max(...points, 1);
+    const bars = points.map((p, i) => {
+      const barHeight = Math.max(1, (p / max) * (height - 2));
+      const x = i * (barWidth + gap);
+      const opacity = 0.3 + (p / max) * 0.7;
+      return `<rect x="${x}" y="${height - barHeight}" width="${barWidth}" height="${barHeight}" fill="${color}" opacity="${opacity}" rx="1"/>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${chartWidth} ${height}" style="width:100%;height:${height}px;"><defs><linearGradient id="bar-grad-${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.9"/><stop offset="100%" stop-color="${color}" stop-opacity="0.3"/></linearGradient></defs>${bars.replace(new RegExp(color, 'g'), `url(#bar-grad-${color.replace('#','')})`)}</svg>`;
   }
 
-  /*
-  private updateCharts() {
-    if (this.charts.has('cpu-memory')) {
-      this.charts.get('cpu-memory').updateSeries([{
-        data: this.history.cpu
-      }, {
-        data: this.history.memory
-      }]);
-    }
-    if (this.charts.has('network')) {
-      this.charts.get('network').updateSeries([{
-        data: this.history.network.rx
-      }, {
-        data: this.history.network.tx
-      }]);
-    }
-
-    const systemInfo = (this as any).currentSystemInfo;
-    if (systemInfo) {
-      // Disk Chart - Update if exists
-      if (this.charts.has('disk')) {
-        const diskUsed = parseFloat(systemInfo.diskUsage.percentage.replace('%', ''));
-        const diskFree = 100 - diskUsed;
-        this.charts.get('disk').updateSeries([diskUsed, diskFree]);
-      } else {
-        // Initialize if not exists (should be handled by initCharts but just in case)
-        this.initDiskChart();
-      }
-
-      // Load Chart - Update if exists
-      if (this.charts.has('load')) {
-        const load = systemInfo.loadAverage.map((v: string) => parseFloat(v));
-        this.charts.get('load').updateSeries([{ data: load }]);
-      } else {
-        this.initLoadChart();
-      }
-    }
+  private renderNetMiniChart(points: number[], color: string): string {
+    if (!points.length) return '';
+    const width = 80;
+    const height = 24;
+    const displayPoints = points.length === 1 ? [points[0], points[0]] : points;
+    const min = Math.min(...displayPoints);
+    const max = Math.max(...displayPoints);
+    const range = Math.max(1, max - min);
+    const stepX = width / Math.max(1, displayPoints.length - 1);
+    const coords = displayPoints.map((p, i) => {
+      const x = i * stepX;
+      const y = height - ((p - min) / range) * (height - 4) - 2;
+      return `${x},${y}`;
+    });
+    const linePath = `M${coords.join(' L')}`;
+    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;"><path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
-  */
+
+  private renderLineChartWithGrid(points: number[], color: string): string {
+    if (!points.length) return '';
+    const width = 600;
+    const height = 120;
+    const padding = 10;
+    const chartW = width - padding * 2;
+    const chartH = height - padding * 2;
+
+    const displayPoints = points.length === 1 ? [points[0], points[0]] : points;
+    const min = 0;
+    const max = 100;
+    const range = max - min;
+    const stepX = chartW / Math.max(1, displayPoints.length - 1);
+
+    const coords = displayPoints.map((p, i) => {
+      const x = padding + i * stepX;
+      const y = padding + chartH - ((p - min) / range) * chartH;
+      return `${x},${y}`;
+    });
+
+    const linePath = `M${coords.join(' L')}`;
+    const areaPath = `M${coords[0].split(',')[0]},${padding + chartH} L${coords.join(' L')} L${coords[coords.length-1].split(',')[0]},${padding + chartH} Z`;
+
+    const horizontalLines = [0, 25, 50, 75, 100].map(v => {
+      const y = padding + chartH - (v / 100) * chartH;
+      return `<line x1="${padding}" y1="${y}" x2="${width-padding}" y2="${y}" stroke="rgba(148,163,184,0.18)" stroke-width="1"/>`;
+    }).join('');
+
+    const verticalLines = Array.from({ length: 24 }, (_, index) => {
+      const x = padding + (chartW / 23) * index;
+      return `<line x1="${x}" y1="${padding}" x2="${x}" y2="${height - padding}" stroke="rgba(148,163,184,0.12)" stroke-width="1"/>`;
+    }).join('');
+
+    return `
+      <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:100%;">
+        <defs>
+          <linearGradient id="area-${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>
+            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${verticalLines}
+        ${horizontalLines}
+        <path d="${areaPath}" fill="url(#area-${color.replace('#','')})"/>
+        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+  }
+
+  private renderUsageBlocks(value: number, color: string): string {
+    const clamped = Math.max(0, Math.min(100, value));
+    const activeCount = Math.min(20, Math.ceil(clamped / 5));
+    const blocks = Array.from({ length: 20 }, (_, index) => {
+      const active = index < activeCount;
+      return `<span class="dash-v3-usage-block${active ? ' active' : ''}" style="--usage-color: ${color}; --usage-index: ${index};"></span>`;
+    }).join('');
+
+    return `<div class="dash-v3-usage-strip" aria-hidden="true">${blocks}</div>`;
+  }
+
+  private renderMiniLineChart(points: number[], color: string): string {
+    if (!points.length) return '';
+    const width = 400;
+    const chartHeight = 80;
+    const indicatorHeight = 20;
+    const height = chartHeight + indicatorHeight + 10;
+    
+    const baseline = 50;
+    
+    const displayPoints = points.length === 1 ? [points[0], points[0]] : points;
+    
+    const min = Math.min(...displayPoints);
+    const max = Math.max(...displayPoints);
+    
+    const latestValue = displayPoints[displayPoints.length - 1];
+    
+    let yAxisMin: number;
+    let yAxisMax: number;
+    
+    if (min >= baseline) {
+      yAxisMin = baseline;
+      yAxisMax = 100;
+    } else if (max <= baseline) {
+      yAxisMin = 0;
+      yAxisMax = baseline;
+    } else {
+      yAxisMin = 0;
+      yAxisMax = 100;
+    }
+    
+    const range = yAxisMax - yAxisMin;
+    const stepX = width / Math.max(1, displayPoints.length - 1);
+    
+    const baselineY = chartHeight - ((baseline - yAxisMin) / range) * (chartHeight - 10) - 5;
+    
+    const coords = displayPoints.map((p, i) => {
+      const x = i * stepX;
+      const y = chartHeight - ((p - yAxisMin) / range) * (chartHeight - 10) - 5;
+      return `${x},${y}`;
+    });
+    
+    const areaPath = `M0,${chartHeight} L${coords.join(' L')} L${width},${chartHeight} Z`;
+    const linePath = `M${coords.join(' L')}`;
+    
+    const indicatorRects = Array.from({ length: 10 }, (_, i) => {
+      const rectWidth = 28;
+      const rectHeight = 10;
+      const rectX = i * (rectWidth + 10) + 20;
+      const rectY = chartHeight + 5;
+      const threshold = (i + 1) * 10;
+      const isActive = latestValue >= threshold;
+      const fill = isActive ? color : 'rgba(255,255,255,0.1)';
+      const rx = 4;
+      
+      return `<rect x="${rectX}" y="${rectY}" width="${rectWidth}" height="${rectHeight}" rx="${rx}" fill="${fill}" />`;
+    }).join('\n');
+    
+    return `
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:100%;">
+        <defs>
+          <linearGradient id="grad-${color.replace('#', '')}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <line x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}" stroke="rgba(255,255,255,0.2)" stroke-width="1" stroke-dasharray="4,4"/>
+        <path d="${areaPath}" fill="url(#grad-${color.replace('#', '')})" />
+        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        ${indicatorRects}
+      </svg>
+    `;
+  }
 
   /**
    * 渲染空仪表盘
@@ -674,14 +482,6 @@ export class DashboardRenderer {
     `;
   }
 
-  /**
-   * 截断文本
-   */
-  private truncateText(text: string, maxLength: number): string {
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength - 3) + '...';
-  }
-
   private renderDashboardPanelIcon(size: 24 | 48): string {
     return `
       <img
@@ -701,40 +501,23 @@ export class DashboardRenderer {
    * 格式化时间
    */
   private formatTime(date: Date): string {
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  }
-
-  /**
-   * 渲染指标卡片
-   */
-  private renderMetricCard(title: string, value: string, unit: string, type: string): string {
-    return `
-      <div class="metric-card ${type}">
-        <div class="metric-header">
-          <span class="metric-title">${title}</span>
-        </div>
-        <div class="metric-content">
-          <span class="metric-value">${value}</span>
-          <span class="metric-unit">${unit}</span>
-        </div>
-      </div>
-    `;
+    const input = date instanceof Date ? date : new Date(date);
+    const year = input.getFullYear();
+    const month = String(input.getMonth() + 1).padStart(2, '0');
+    const day = String(input.getDate()).padStart(2, '0');
+    const hours = String(input.getHours()).padStart(2, '0');
+    const minutes = String(input.getMinutes()).padStart(2, '0');
+    const seconds = String(input.getSeconds()).padStart(2, '0');
+    return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
   }
 
   /**
    * 获取CPU使用率
    */
   private getCpuUsage(systemInfo: SystemInfo): string {
-    // 从cpuInfo.usage中提取数字
     const usage = systemInfo.cpuInfo.usage.replace('%', '');
-    return parseFloat(usage).toFixed(1);
+    const value = Number.parseFloat(usage);
+    return Number.isFinite(value) ? value.toFixed(1) : '0.0';
   }
 
   /**
@@ -743,6 +526,7 @@ export class DashboardRenderer {
   private getMemoryUsage(systemInfo: SystemInfo): string {
     const total = this.parseMemoryValue(systemInfo.memoryUsage.total);
     const used = this.parseMemoryValue(systemInfo.memoryUsage.used);
+    if (total <= 0) return '0.0';
     return ((used / total) * 100).toFixed(1);
   }
 
@@ -750,77 +534,137 @@ export class DashboardRenderer {
    * 获取磁盘使用率
    */
   private getDiskUsage(systemInfo: SystemInfo): string {
-    return systemInfo.diskUsage.percentage.replace('%', '');
+    const value = Number.parseFloat(systemInfo.diskUsage.percentage.replace('%', ''));
+    return Number.isFinite(value) ? value.toFixed(1) : '0.0';
   }
 
   /**
    * 解析内存值
    */
   private parseMemoryValue(memStr: string): number {
-    const value = parseFloat(memStr.replace(/[^\d.]/g, ''));
-    if (memStr.includes('GB')) return value * 1024;
+    const match = memStr.trim().match(/^(\d+(?:\.\d+)?)\s*([KMGT]?B)?$/i);
+    if (!match) return 0;
+    const value = Number.parseFloat(match[1]);
+    const unit = (match[2] || 'MB').toUpperCase();
+    if (!Number.isFinite(value)) return 0;
+    if (unit === 'KB') return value / 1024;
+    if (unit === 'MB') return value;
+    if (unit === 'GB') return value * 1024;
+    if (unit === 'TB') return value * 1024 * 1024;
     return value;
   }
 
   /**
-   * 渲染分区列表
+   * 检测系统类型并更新概览中的 OS 字段
    */
-  private renderPartitionList(systemInfo: SystemInfo): string {
-    if (!systemInfo.partitions || systemInfo.partitions.length === 0) {
-      // Fallback if no partitions data (old backend or error)
-      return this.renderLegacyDiskInfo(systemInfo);
+  private async detectAndShowSystemType(): Promise<void> {
+    try {
+      const info = await SystemDetector.detectSystem();
+      const displayName = info.type === 'unknown' && info.prettyName
+        ? info.prettyName
+        : SystemDetector.getSystemDisplayName(info.type);
+      const systemText = info.version && info.type !== 'unknown'
+        ? `${displayName} ${info.version}`
+        : displayName;
+
+      this.systemMetaCache = {
+        ...(this.systemMetaCache || {
+          kernel: '--',
+          arch: '--',
+          virtualization: '--',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '--'
+        }),
+        os: systemText
+      };
+      const osEl = document.getElementById('dashboard-os-value');
+      if (osEl) {
+        osEl.textContent = systemText;
+        osEl.setAttribute('title', systemText);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * 加载系统元数据
+   */
+  private async loadSystemMeta(): Promise<void> {
+    if (this.systemMetaCache && this.systemMetaCache.kernel !== '--') {
+      this.updateSystemMetaToDom(this.systemMetaCache);
+      return;
     }
 
-    return systemInfo.partitions.map(part => {
-      const percentage = parseFloat(part.percentage.replace('%', ''));
-      
-      // Calculate color code for inline style if needed, or use CSS variables
-      const colorVar = percentage > 90 ? 'var(--error-color)' : (percentage > 75 ? 'var(--warning-color)' : 'var(--primary-color)');
+    const app = (window as any).app;
+    if (!app?.sshManager?.executeCommand) return;
 
-      return `
-        <div class="partition-item" style="display: flex; flex-direction: column; gap: 6px;">
-          <div class="partition-header" style="display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
-            <div class="partition-info" style="display: flex; align-items: center; gap: 8px;">
-              <span class="partition-mount" style="font-weight: 600; color: var(--text-primary);">${part.mountpoint}</span>
-              <span class="partition-fs" style="font-size: 11px; color: var(--text-secondary); background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">${part.filesystem}</span>
-            </div>
-            <div class="partition-stats" style="color: var(--text-secondary);">
-              <span style="color: var(--text-primary); font-weight: 500;">${part.used}</span> / ${part.size}
-            </div>
-          </div>
-          <div class="partition-bar-bg" style="width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
-            <div class="partition-bar-fill" style="width: ${part.percentage}; height: 100%; background: ${colorVar}; border-radius: 4px; transition: width 0.5s ease;"></div>
-          </div>
-          <div class="partition-footer" style="display: flex; justify-content: flex-end; font-size: 11px; color: var(--text-secondary);">
-            <span>可用: <span style="color: var(--success-color);">${part.available}</span></span>
-            <span style="margin: 0 4px;">•</span>
-            <span>使用率: <span style="color: ${colorVar}; font-weight: 600;">${part.percentage}</span></span>
-          </div>
-        </div>
-      `;
-    }).join('');
+    try {
+      const command = [
+        'echo "__KERNEL__$(uname -r 2>/dev/null)"',
+        'echo "__ARCH__$(uname -m 2>/dev/null)"',
+        'echo "__TZ__$( (timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || date +%Z) | head -n1 )"',
+        'echo "__VIRT__$(systemd-detect-virt 2>/dev/null || echo none)"'
+      ].join(' && ');
+
+      const raw = await app.sshManager.executeCommand(command);
+      const lines = String(raw).split('\n').map((line: string) => line.trim());
+      const meta = {
+        os: this.systemMetaCache?.os || 'Linux',
+        kernel: lines.find((line: string) => line.startsWith('__KERNEL__'))?.replace('__KERNEL__', '') || '--',
+        arch: lines.find((line: string) => line.startsWith('__ARCH__'))?.replace('__ARCH__', '') || '--',
+        timezone: lines.find((line: string) => line.startsWith('__TZ__'))?.replace('__TZ__', '') || '--',
+        virtualization: lines.find((line: string) => line.startsWith('__VIRT__'))?.replace('__VIRT__', '') || '--'
+      };
+      this.systemMetaCache = meta;
+      this.updateSystemMetaToDom(meta);
+    } catch {
+      // ignore
+    }
   }
 
-  private renderLegacyDiskInfo(systemInfo: SystemInfo): string {
-    return `
-      <div class="disk-detail-item" style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
-        <span class="label" style="color: var(--text-secondary);">总空间</span>
-        <span class="value" style="font-weight: 600;">${systemInfo.diskUsage.total}</span>
-      </div>
-      <div class="disk-detail-item" style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
-        <span class="label" style="color: var(--text-secondary);">已使用</span>
-        <span class="value" style="font-weight: 600; color: var(--error-color);">${systemInfo.diskUsage.used}</span>
-      </div>
-      <div class="disk-detail-item" style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
-        <span class="label" style="color: var(--text-secondary);">可用空间</span>
-        <span class="value" style="font-weight: 600; color: var(--success-color);">${systemInfo.diskUsage.available}</span>
-      </div>
-      <div class="disk-detail-item" style="display: flex; justify-content: space-between;">
-        <span class="label" style="color: var(--text-secondary);">使用率</span>
-        <span class="value highlight" style="font-weight: bold; color: var(--primary-color);">${systemInfo.diskUsage.percentage}</span>
-      </div>
-    `;
+  /**
+   * 更新系统元数据到 DOM
+   */
+  private updateSystemMetaToDom(meta: { os: string; kernel: string; arch: string; virtualization: string; timezone: string }): void {
+    const mapping: Array<{ id: string; value: string }> = [
+      { id: 'dashboard-os-value', value: meta.os },
+      { id: 'dashboard-kernel-value', value: meta.kernel },
+      { id: 'dashboard-arch-value', value: meta.arch },
+      { id: 'dashboard-virt-value', value: meta.virtualization },
+      { id: 'dashboard-timezone-value', value: meta.timezone }
+    ];
+
+    mapping.forEach(item => {
+      const el = document.getElementById(item.id);
+      if (!el) return;
+      el.textContent = item.value;
+      el.setAttribute('title', item.value);
+    });
   }
+
+  updateMetricCards(systemInfo: SystemInfo): void {
+    const memUsage = parseFloat(this.getMemoryUsage(systemInfo));
+    const diskUsage = parseFloat(this.getDiskUsage(systemInfo));
+
+    this.memoryHistory.push(memUsage);
+    this.diskHistory.push(diskUsage);
+    while (this.memoryHistory.length > DashboardRenderer.HISTORY_MAX) this.memoryHistory.shift();
+    while (this.diskHistory.length > DashboardRenderer.HISTORY_MAX) this.diskHistory.shift();
+
+    const memEl = document.querySelector('#chart-memory');
+    if (memEl) {
+      memEl.innerHTML = this.renderMiniLineChart(this.memoryHistory.slice(-10), '#06b6d4');
+    }
+
+    const diskEl = document.querySelector('#chart-disk-trend');
+    if (diskEl) {
+      diskEl.innerHTML = this.renderMiniLineChart(this.diskHistory.slice(-10), '#f97316');
+    }
+  }
+
+  initCharts(_force: boolean = false): void {
+  }
+
 }
 
 // Declare ApexCharts global

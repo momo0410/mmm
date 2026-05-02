@@ -216,29 +216,6 @@ function extractTextFromPayload(payload: any, provider: AIProviderKind): string 
   )
 }
 
-function extractTextFromResponseData(data: any, provider: AIProviderKind): string {
-  if (provider === 'claude') {
-    if (Array.isArray(data?.content)) {
-      return data.content
-        .map((item: any) => item?.text)
-        .filter((item: unknown): item is string => typeof item === 'string')
-        .join('')
-    }
-    return ''
-  }
-
-  if (provider === 'ollama') {
-    return data?.message?.content || data?.response || ''
-  }
-
-  return (
-    data?.choices?.[0]?.message?.content ||
-    data?.choices?.[0]?.delta?.content ||
-    data?.choices?.[0]?.text ||
-    ''
-  )
-}
-
 async function parseProxyError(response: Response): Promise<string> {
   const raw = await response.text().catch(() => '')
 
@@ -291,33 +268,6 @@ function flushStreamBuffer(
   }
 
   return { remainder, combinedText }
-}
-
-export async function requestAIProxyMessages(
-  messages: AIChatMessage[],
-  config: AIProviderConfig
-): Promise<string> {
-  const provider = normalizeProvider(config)
-  const response = await fetch(`${PYTHON_API_BASE_URL}/ai/chat-proxy`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      url: buildTargetUrl(config, provider),
-      headers: buildHeaders(config, provider),
-      body: buildRequestBody(messages, config, provider, false),
-      timeout_seconds: config.timeoutSeconds ?? 90,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(await parseProxyError(response))
-  }
-
-  const proxyData = await response.json().catch(() => ({}))
-  const data = proxyData?.data ?? proxyData
-  return extractTextFromResponseData(data, provider)
 }
 
 export async function streamAIProxyMessages(

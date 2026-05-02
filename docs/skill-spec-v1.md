@@ -9,9 +9,9 @@
 - 可测试
 - 可审核
 - 可落盘
-- 与 legacy Python class skill 兼容
+- 与 SKILL.md 知识文档共存
 
-本版本不替换现有执行引擎，而是把声明层统一到 spec，再复用现有 `RuntimeDeclarativeSkill`、`RuntimeSkillFactory`、`SkillRegistry`。
+本版本不替换现有执行引擎，而是把声明层统一到 spec，配合 SkillLoader + SkillMdParser 实现 json+md 共存加载。
 
 ## 目录结构
 
@@ -34,16 +34,16 @@ skills/
 
 代码入口：
 
-- `app.services.agent.skills.specs.SkillSpec`
-- `app.services.agent.skills.specs.SkillSpecValidator`
-- `app.services.agent.skills.loader.SkillSpecLoader`
+- `app.services.skill_engine.skill_loader.SkillLoader`
+- `app.services.skill_engine.skill_md_parser.SkillMdParser`
 
 Pydantic schema 会导出 JSON Schema：
 
 ```python
-from app.services.agent.skills.specs import SkillSpecValidator
+from app.services.skill_engine import SkillLoader
 
-schema = SkillSpecValidator.json_schema()
+loader = SkillLoader("skills/")
+skills = loader.load_all()
 ```
 
 ## 顶层字段
@@ -65,7 +65,11 @@ schema = SkillSpecValidator.json_schema()
 | `output_template` | string | 否 | 报告模板 |
 | `tags` | list | 否 | 标签 |
 | `owners` | list | 否 | 维护者 |
-| `legacy_compatibility` | object | 否 | legacy Python skill 对应关系 |
+| `knowledge_file` | string | 否 | 同目录下 SKILL.md 的文件名，供 LLM 上下文注入 |
+| `domain` | string | 否 | 领域（如 cybersecurity） |
+| `subdomain` | string | 否 | 子领域（如 digital-forensics） |
+| `nist_csf` | list | 否 | NIST CSF 映射标识 |
+| `legacy_compatibility` | object | 否 | 旧版 Python class 对应关系（已废弃，保留字段向后兼容） |
 
 ## Step 字段
 
@@ -105,7 +109,7 @@ schema = SkillSpecValidator.json_schema()
 
 ## 默认加载规则
 
-默认 `SkillSpecLoader` 行为：
+默认 `SkillLoader` 行为：
 
 - 自动加载 `builtin` + `generated` 中 `status=active` 的 spec
 - `generated` 中 `draft` spec 不自动加载
@@ -134,11 +138,11 @@ schema = SkillSpecValidator.json_schema()
 
 当前闭环如下：
 
-1. `SkillSpecLoader` 从仓库根目录 `skills/` 发现 JSON 文件
-2. `SkillSpecValidator` 校验 schema 和目录来源是否一致
-3. `SkillSpec` 转换为 runtime config
-4. `RuntimeSkillFactory` 生成 `RuntimeDeclarativeSkill`
-5. `SkillRegistry` 注册 skill
+1. `SkillLoader` 从仓库根目录 `skills/` 发现 JSON + SKILL.md 文件
+2. 同目录 json + md 共存 → mode=hybrid
+3. 仅 json → mode=pipeline
+4. 仅 md → mode=knowledge
+5. 合并后 `LoadedSkill` 包含 json 步骤 + md 知识
 
 默认 registry 组装顺序：
 
@@ -155,16 +159,71 @@ schema = SkillSpecValidator.json_schema()
 
 当前已迁移两个 builtin skill 样例：
 
-- [skills/builtin/capability_check.json](D:/项目/new-lovely/skills/builtin/capability_check.json)
-- [skills/builtin/remediation_verification.json](D:/项目/new-lovely/skills/builtin/remediation_verification.json)
+- `skills/builtin/capability-check/` (hybrid: skill.json + SKILL.md)
+- `skills/builtin/remediation-verification/` (pipeline: skill.json)
 
 ## 向后兼容
 
-当前仍保留 legacy 通道：
+- `legacy_compatibility` 字段保留但已废弃，不再引用实际 Python class
+- 旧的 flat 文件结构（直接放在 builtin/ 下的 .json）已迁移到子目录结构
 
-- `BaseSkill` 继续是执行抽象
-- legacy Python skill 默认 `source=legacy_python`
-- spec loader 只覆盖已迁移的同名 skill
-- 未迁移 builtin skill 不受影响
+## JSON + SKILL.md 共存模式
 
-这保证了本轮升级先打通“spec -> loader -> validator -> registry”，而不是一次性重写全部 skill。
+### 设计原则
+
+skill.json 是**执行入口**（规则引擎，声明式步骤调度），SKILL.md 是**知识增强**（AI 调度，供 LLM 上下文参考）。两者不是 1:1 绑定——json 是按需升级件，md 是默认主力。
+
+### 三种模式
+
+| 模式 | 文件组成 | 调度方式 | 适用场景 |
+|------|---------|---------|---------|
+| `knowledge` | 仅 SKILL.md | LLM 读取 md 自行推理执行 | 探索性、灵活场景 |
+| `pipeline` | 仅 skill.json | 引擎按 steps[] 硬控调度 | 纯自动化流水线 |
+| `hybrid` | json + md | 引擎调度 steps，同时将 md 注入 LLM 上下文 | 关键节点硬控 + 细节 AI 补全 |
+
+### 目录结构示例
+
+```text
+skills/
+  builtin/
+    capability-check/
+      skill.json            # pipeline 或 hybrid 模式
+      SKILL.md              # hybrid 时存在
+    remediation-verification/
+      skill.json
+  experimental/
+    pentest-agent/
+      skill.json            # hybrid 模式
+      SKILL.md              # 知识文档
+    pentest-recon/
+      SKILL.md              # knowledge 模式，仅 md
+  generated/
+    some-ai-skill/
+      SKILL.md              # knowledge 模式
+```
+
+### knowledge_file 字段
+
+skill.json 中可通过 `knowledge_file` 显式指向同目录下的 SKILL.md：
+
+```json
+{
+  "schema_version": "skill-spec/v1",
+  "name": "capability-check",
+  "knowledge_file": "SKILL.md",
+  ...
+}
+```
+
+不设置时，SkillLoader 会自动发现同目录下的 SKILL.md。
+
+### 调度流程
+
+```
+用户请求 → SkillLoader 发现 skill
+           ├─ mode=knowledge → 读取 SKILL.md → 注入 LLM system prompt → LLM 自主执行
+           ├─ mode=pipeline  → 读取 skill.json → 引擎按 steps[] 调度执行
+           └─ mode=hybrid    → 读取 skill.json + SKILL.md
+                                → md 内容注入 LLM 上下文
+                                → 引擎按 steps[] 调度（LLM 参考 md 补全细节）
+```

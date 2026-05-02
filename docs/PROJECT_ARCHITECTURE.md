@@ -1,8 +1,8 @@
-# LovelyRes - Linux 应急响应与安全审计平台
+# SDIT - Linux 应急响应与安全审计平台
 
 ## 项目概述
 
-LovelyRes 是一款面向 Linux 系统管理员和安全工程师的桌面级应急响应工具,采用 Tauri + Vue + Python FastAPI 全栈架构,集成 AI Agent 智能分析能力,提供系统检测、安全审计、远程管理、自动修复等一站式解决方案。
+SDIT 是一款面向 Linux 系统管理员和安全工程师的桌面级应急响应工具,采用 Tauri + Vue + Python FastAPI 全栈架构,集成 AI Agent 智能分析能力,提供系统检测、安全审计、远程管理、自动修复等一站式解决方案。
 
 **版本**: 0.55.0  
 **技术栈**: Tauri + Vue 3 + TypeScript + Python FastAPI  
@@ -60,7 +60,7 @@ LovelyRes 是一款面向 Linux 系统管理员和安全工程师的桌面级应
 
 #### 1.1 核心应用层
 
-**LovelyResApp** (`src/modules/core/app.ts`)
+**SDITApp** (`src/modules/core/app.ts`)
 - 应用生命周期管理 (初始化、渲染、事件绑定)
 - 全局状态管理 (StateManager)
 - UI 模式切换 (经典模式 / AI 指挥台模式)
@@ -643,42 +643,30 @@ new-lovely/
 
 ### 添加新 Skill
 
-**方式 1: Python 代码实现**
+**方式 1: SKILL.md 知识模式 (AI调度)**
 
-```python
-from app.services.agent.skills.registry import BaseSkill, SkillStep
-
-class MyNewSkill(BaseSkill):
-    @property
-    def name(self) -> str:
-        return "my_new_skill"
-    
-    @property
-    def description(self) -> str:
-        return "我的新技能描述"
-    
-    @property
-    def category(self) -> str:
-        return "investigation"
-    
-    def build_steps(self, args, context):
-        return [
-            SkillStep(
-                name="检查系统状态",
-                description="执行系统检查命令",
-                tool_name="execute_command",
-                parameters={"command": "uname -a"},
-            )
-        ]
-
-# 注册到注册表
-registry.register(MyNewSkill())
+```markdown
+---
+name: my_new_skill
+description: 我的新技能描述
+domain: custom
+tags: [investigation]
+---
+# My New Skill
+## When to Use
+- 当需要检查系统状态时
+## Workflow
+### Step 1: 检查系统状态
+执行 `uname -a` 获取系统信息
 ```
 
-**方式 2: JSON 规范定义**
+保存到 `skills/<category>/my-new-skill/SKILL.md`
+
+**方式 2: skill.json 流水线模式 (规则引擎)**
 
 ```json
 {
+  "schema_version": "skill-spec/v1",
   "name": "my_new_skill",
   "description": "我的新技能描述",
   "category": "investigation",
@@ -686,15 +674,21 @@ registry.register(MyNewSkill())
   "status": "active",
   "steps": [
     {
+      "id": "step1",
       "name": "检查系统状态",
       "tool_name": "execute_command",
-      "parameters": {"command": "uname -a"}
+      "parameters": {"command": "uname -a"},
+      "depends_on": []
     }
   ]
 }
 ```
 
-保存到 `skills/builtin/my_new_skill.json`
+保存到 `skills/<category>/my-new-skill/skill.json`
+
+**方式 3: hybrid 混合模式**
+
+同目录放 `skill.json` + `SKILL.md`，json 中加 `"knowledge_file": "SKILL.md"`
 
 ### 添加新 Tool
 

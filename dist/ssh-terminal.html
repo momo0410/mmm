@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSH Terminal - Linux Emergency Response Tool</title>
+    <title>安御智测</title>
+    <link rel="icon" type="image/png" href="./logo.png" />
     <style>
         body {
             margin: 0;
@@ -75,33 +76,15 @@
             animation: slideInRight 0.2s ease-out !important;
         }
     </style>
-  <script type="module" crossorigin src="./assets/ssh-terminal-ByYJUhG7.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/vendor-modules-Lk-ZyZPM.js">
-  <link rel="modulepreload" crossorigin href="./assets/base-Co0dsuHs.js">
-  <link rel="stylesheet" crossorigin href="./assets/style-TXsUWpPe.css">
+  <script type="module" crossorigin src="./assets/ssh-terminal-DqYiYDcu.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/vendor-modules-PF__89IX.js">
+  <link rel="modulepreload" crossorigin href="./assets/base-H8mEGGvp.js">
+  <link rel="stylesheet" crossorigin href="./assets/style-DXFT0yut.css">
 </head>
 <body>
     <div id="app">
-        <!-- 自定义标题栏（仅在非 macOS 上显示） -->
-        <div class="modern-title-bar" data-tauri-drag-region id="custom-title-bar">
-            <div class="title-bar-left">
-                <div class="app-logo">
-                    <div class="logo-icon" style="width: 24px; height: 24px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                        <img src="./logo.png" alt="LERT Logo">
-                    </div>
-                    <div class="app-info">
-                        <div class="app-name" style="font-size: 14px;">SSH Terminal</div>
-                        <div style="font-size: 9px; color: var(--text-secondary);">Linux Emergency Response Tool</div>
-                    </div>
-                </div>
-            </div>
-            <div class="title-bar-right" id="window-controls-container">
-                <!-- 窗口控制按钮将通过 JavaScript 动态添加（非 macOS） -->
-            </div>
-        </div>
-
         <!-- SSH终端内容 -->
-        <div id="ssh-terminal-content"></div>
+        <div id="ssh-terminal-content" style="height: 100vh;"></div>
     </div>
 
 </body>

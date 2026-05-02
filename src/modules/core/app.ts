@@ -1,5 +1,5 @@
 /**
- * LovelyRes 核心应用类
+ * SDIT 核心应用类
  * 负责应用初始化、状态管理和模块协调
  */
 import { invoke } from '../../shims/@tauri-apps/api/core';
@@ -15,7 +15,7 @@ import { sshTerminalManager } from '../ssh/sshTerminalManager';
 // @ts-ignore - 类型被重新导出供其他模块使用
 import type { AppPage, UIMode, AppState, ServerInfo } from '../ui/pageTypes';
 export type { AppPage, UIMode, AppState, ServerInfo } from '../ui/pageTypes';
-export class LovelyResApp {
+export class SDITApp {
   private stateManager: StateManager;
   private modernUIRenderer: ModernUIRenderer;
   private themeManager: ThemeManager;
@@ -43,7 +43,7 @@ export class LovelyResApp {
    */
   async initialize(): Promise<void> {
     try {
-      console.log('🚀 LovelyRes 应用初始化开始...');
+      console.log('🚀 SDIT 应用初始化开始...');
       
       // 初始化状态管理器
       await this.stateManager.initialize();
@@ -56,12 +56,14 @@ export class LovelyResApp {
       await this.settingsManager.initialize();
       // 初始化SSH终端管理器
       await sshTerminalManager.initialize();
+      // 检查是否存在已有的SSH连接（浏览器刷新后恢复页面状态）
+      await this.checkAndRestoreConnection();
       // 渲染UI
       this.render();
       // 绑定事件
       this.bindEvents();
       
-      console.log('✅ LovelyRes 应用初始化完成');
+      console.log('✅ SDIT 应用初始化完成');
     } catch (error) {
       console.error('❌ 应用初始化失败:', error);
       throw error;
@@ -96,6 +98,31 @@ export class LovelyResApp {
     } catch (error) {
       console.error('从后端加载主题设置失败:', error);
       return null;
+    }
+  }
+  /**
+   * 检查并恢复已有的SSH连接状态（浏览器刷新后恢复页面状态）
+   */
+  private async checkAndRestoreConnection(): Promise<void> {
+    try {
+      const status = await sshConnectionManager.checkConnectionStatus();
+      if (status && status.connected) {
+        this.stateManager.setConnected(true, status.host, {
+          host: status.host,
+          port: status.port,
+          username: status.username
+        });
+        this.stateManager.setCurrentPage('dashboard');
+        // 预加载仪表盘数据，避免渲染时闪现"正在加载监控数据"
+        try {
+          await this.sshManager.fetchSystemSummary();
+        } catch (e) {
+          console.warn('预加载系统摘要失败（将在页面激活时重试）:', e);
+        }
+        console.log('🔄 已恢复SSH连接状态，跳转到仪表盘页面');
+      }
+    } catch (error) {
+      console.error('检查SSH连接状态失败:', error);
     }
   }
   /**
@@ -160,10 +187,49 @@ export class LovelyResApp {
       if (!hideSidebar) {
         setTimeout(() => this.modernUIRenderer.bindMiniSidebarTooltips(), 0);
       }
+      // 初始渲染后激活当前页面，触发数据加载
+      if (!hideSidebar) {
+        setTimeout(() => this.modernUIRenderer.activateCurrentPage(), 0);
+      }
       // 加载样式
       this.loadStyles();
     }
   }
+
+  /**
+   * 更新导航栏激活状态
+   */
+  private updateNavActiveState(navId: string): void {
+    document.querySelectorAll('.nav-item').forEach(item => {
+      const htmlItem = item as HTMLElement;
+      const id = htmlItem.getAttribute('data-nav-id');
+      if (id) {
+        const isActive = id === navId;
+        htmlItem.classList.toggle('active', isActive);
+        if (isActive) {
+          if (!htmlItem.querySelector('.nav-item-indicator')) {
+            const indicator = document.createElement('div');
+            indicator.className = 'nav-item-indicator';
+            htmlItem.insertBefore(indicator, htmlItem.firstChild);
+          }
+        } else {
+          const indicator = htmlItem.querySelector('.nav-item-indicator');
+          if (indicator) indicator.remove();
+        }
+      }
+    });
+  }
+
+  /**
+   * 切换页面（保留 DOM 状态）
+   */
+  switchToPage(pageId: string): void {
+    this.stateManager.setCurrentPage(pageId as any);
+    this.modernUIRenderer.updateState(this.stateManager.getState());
+    this.modernUIRenderer.switchToPage(pageId);
+    this.updateNavActiveState(pageId);
+  }
+
   /**
    * 加载样式文件
    */
@@ -205,7 +271,8 @@ export class LovelyResApp {
             this.modernUIRenderer.hideMiniSidebarTooltip();
             this.stateManager.setCurrentPage(navId as any);
             this.modernUIRenderer.updateState(this.stateManager.getState());
-            this.render(); // 重新渲染以更新视图
+            this.modernUIRenderer.switchToPage(navId);
+            this.updateNavActiveState(navId);
         }
       }
       // 点击外部关闭下拉菜单

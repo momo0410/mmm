@@ -4,12 +4,14 @@
  */
 import type { AppState } from '../ui/pageTypes';
 import type { ModernUIRenderer } from '../ui/modernUIRenderer';
-import type { AppPage } from '../ui/pageTypes';
+import type { AppPage, PageState } from '../ui/pageTypes';
 import { DEFAULT_PAGE, DEFAULT_UI_MODE } from '../ui/pageTypes';
 import { EventEmitter } from '../utils/EventEmitter';
 export class StateManager extends EventEmitter<AppState> {
   private state: AppState;
   private uiRenderer?: ModernUIRenderer;
+  private pageStates: Record<string, Partial<PageState>> = {};
+
   constructor() {
     super();
     this.state = {
@@ -168,6 +170,30 @@ export class StateManager extends EventEmitter<AppState> {
   private notifyListeners(): void {
     this.emit(this.getState());
   }
+  /**
+   * 保存页面状态
+   */
+  savePageState(pageId: string, partial: Partial<PageState>): void {
+    if (!this.pageStates[pageId]) {
+      this.pageStates[pageId] = {};
+    }
+    Object.assign(this.pageStates[pageId], partial);
+  }
+
+  /**
+   * 获取页面状态
+   */
+  getPageState(pageId: string): Partial<PageState> {
+    return { ...(this.pageStates[pageId] || {}) };
+  }
+
+  /**
+   * 清除所有页面状态
+   */
+  clearPageStates(): void {
+    this.pageStates = {};
+  }
+
   /**
    * 重置状态
    */

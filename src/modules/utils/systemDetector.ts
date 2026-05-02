@@ -5,21 +5,7 @@
 
 import { invoke } from '../../shims/@tauri-apps/api/core';
 
-export type SystemType = 
-  | 'ubuntu'      // Ubuntu
-  | 'debian'      // Debian
-  | 'centos'      // CentOS
-  | 'rhel'        // Red Hat Enterprise Linux
-  | 'fedora'      // Fedora
-  | 'kylin'       // 麒麟 (Kylin)
-  | 'uos'         // 统信 UOS (UnionTech OS)
-  | 'deepin'      // 深度 (Deepin)
-  | 'openeuler'   // 开放欧拉 (openEuler)
-  | 'anolis'      // 龙蜥 (Anolis OS)
-  | 'arch'        // Arch Linux
-  | 'opensuse'    // openSUSE
-  | 'alpine'      // Alpine Linux
-  | 'generic';    // 通用 Linux
+export type SystemType = string;
 
 export interface SystemInfo {
   type: SystemType;
@@ -68,7 +54,7 @@ export class SystemDetector {
     try {
       // 读取 /etc/os-release
       const osReleaseResult = await invoke('ssh_execute_command_direct', {
-        command: 'cat /etc/os-release 2>/dev/null || cat /etc/lsb-release 2>/dev/null || echo "ID=generic"'
+        command: 'cat /etc/os-release 2>/dev/null || cat /etc/lsb-release 2>/dev/null || echo "ID=unknown"'
       });
 
       const osReleaseContent = osReleaseResult?.output || '';
@@ -106,11 +92,11 @@ export class SystemDetector {
     prettyName: string;
   } {
     const lines = content.split('\n');
-    let id = 'generic';
+    let id = 'unknown';
     let idLike = '';
     let name = 'Linux';
     let version = '';
-    let prettyName = 'Generic Linux';
+    let prettyName = 'Linux';
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -127,7 +113,7 @@ export class SystemDetector {
       }
     }
 
-    // 识别系统类型（使用 ID 和 ID_LIKE）
+    // 识别系统类型（使用 ID 和 ID_LIKE），对未知 ID 直接保留原始值以适配所有发行版
     const type = this.identifySystemType(id, idLike, name, prettyName);
 
     return { type, name, version, prettyName };
@@ -135,19 +121,17 @@ export class SystemDetector {
 
   /**
    * 识别系统类型（使用 ID 和 ID_LIKE 字段）
+   * 对无法精确识别的发行版，直接返回原始 ID，从而支持任意 Linux 发行版
    */
   private static identifySystemType(id: string, idLike: string, name: string, prettyName: string): SystemType {
     const combined = `${id} ${idLike} ${name} ${prettyName}`.toLowerCase();
 
-    // 优先使用 ID 字段精确匹配
-    // 国产系统
+    // 优先使用 ID 字段精确匹配常见发行版
     if (id === 'kylin') return 'kylin';
     if (id === 'uos' || id === 'uniontech') return 'uos';
     if (id === 'deepin') return 'deepin';
     if (id === 'openeuler') return 'openeuler';
     if (id === 'anolis') return 'anolis';
-
-    // 常见发行版
     if (id === 'ubuntu') return 'ubuntu';
     if (id === 'debian') return 'debian';
     if (id === 'centos') return 'centos';
@@ -156,21 +140,18 @@ export class SystemDetector {
     if (id === 'arch') return 'arch';
     if (id === 'opensuse' || id === 'opensuse-leap' || id === 'opensuse-tumbleweed') return 'opensuse';
     if (id === 'alpine') return 'alpine';
+    if (id === 'kali') return 'kali';
 
     // 使用 ID_LIKE 字段进行模糊匹配（处理派生发行版）
     if (idLike) {
-      // 国产系统可能基于其他发行版
       if (combined.includes('kylin') || combined.includes('麒麟')) return 'kylin';
       if (combined.includes('uos') || combined.includes('uniontech') || combined.includes('统信')) return 'uos';
       if (combined.includes('deepin') || combined.includes('深度')) return 'deepin';
       if (combined.includes('openeuler') || combined.includes('欧拉')) return 'openeuler';
       if (combined.includes('anolis') || combined.includes('龙蜥')) return 'anolis';
-
-      // 根据 ID_LIKE 判断系统族群
       if (idLike.includes('ubuntu')) return 'ubuntu';
       if (idLike.includes('debian')) return 'debian';
       if (idLike.includes('rhel') || idLike.includes('fedora')) {
-        // 进一步区分 RHEL 系
         if (combined.includes('centos')) return 'centos';
         if (combined.includes('fedora')) return 'fedora';
         return 'rhel';
@@ -189,7 +170,8 @@ export class SystemDetector {
     if (combined.includes('opensuse') || combined.includes('suse')) return 'opensuse';
     if (combined.includes('alpine')) return 'alpine';
 
-    return 'generic';
+    // 无法归类时直接返回原始 ID，以支持所有 Linux 发行版
+    return id || 'unknown';
   }
 
   /**
@@ -243,10 +225,10 @@ export class SystemDetector {
    */
   private static getDefaultSystemInfo(): SystemInfo {
     return {
-      type: 'generic',
+      type: 'unknown',
       name: 'Linux',
       version: '',
-      prettyName: 'Generic Linux',
+      prettyName: 'Linux',
       packageManager: 'unknown',
       initSystem: 'unknown'
     };
@@ -261,9 +243,10 @@ export class SystemDetector {
 
   /**
    * 获取系统类型的显示名称
+   * 对未知发行版自动将 ID 格式化为可读名称（如 "manjaro" -> "Manjaro"）
    */
   static getSystemDisplayName(type: SystemType): string {
-    const names: Record<SystemType, string> = {
+    const names: Record<string, string> = {
       ubuntu: 'Ubuntu',
       debian: 'Debian',
       centos: 'CentOS',
@@ -277,8 +260,13 @@ export class SystemDetector {
       arch: 'Arch Linux',
       opensuse: 'openSUSE',
       alpine: 'Alpine Linux',
-      generic: 'Generic Linux'
+      kali: 'Kali Linux',
+      unknown: 'Linux'
     };
-    return names[type] || type;
+    if (names[type]) return names[type];
+    // 自动格式化未知 ID：将 "-" 替换为空格，每个单词首字母大写
+    return type
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
   }
 }

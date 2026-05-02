@@ -102,6 +102,11 @@ const decodeUnicode = (value: string): string => value
   .replace(/\\u\{([0-9a-fA-F]+)\}/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
   .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 
+const encodeJwtSegment = (value: unknown): string => encodeBase64(JSON.stringify(value))
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/g, '');
+
 const decodeJwtSegment = (segment: string, label: string): unknown => {
   try {
     return JSON.parse(decodeBase64(segment));
@@ -123,8 +128,25 @@ export const encodeByType = (type: EncodingType, value: string): string => {
       return encodeHtml(value);
     case 'unicode':
       return encodeUnicode(value);
-    case 'jwt':
-      return 'JWT 不支持编码操作';
+    case 'jwt': {
+      const normalized = value.trim();
+
+      if (!normalized) {
+        return '';
+      }
+
+      let payload: unknown;
+
+      try {
+        payload = JSON.parse(normalized);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`JWT payload 必须是有效的 JSON: ${message}`);
+      }
+
+      const header = { alg: 'none', typ: 'JWT' };
+      return `${encodeJwtSegment(header)}.${encodeJwtSegment(payload)}.`;
+    }
   }
 };
 

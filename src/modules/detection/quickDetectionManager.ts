@@ -1344,6 +1344,13 @@ export class QuickDetectionManager {
   }
 
   /**
+   * 历史记录：刷新历史列表 UI
+   */
+  refreshHistoryUI(): void {
+    this.updateHistoryList();
+  }
+
+  /**
    * 历史记录：更新历史列表UI
    */
   private updateHistoryList(): void {
@@ -2217,9 +2224,7 @@ export class QuickDetectionManager {
         if (commandText) {
           const commandContainer = document.createElement('div');
           commandContainer.style.cssText = `
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            display: block;
             margin: 8px 0;
             padding: 8px;
             background: var(--bg-tertiary);
@@ -2237,21 +2242,7 @@ export class QuickDetectionManager {
             white-space: pre;
           `;
 
-          const executeBtn = document.createElement('button');
-          executeBtn.className = 'modern-btn secondary';
-          executeBtn.style.cssText = `
-            font-size: 10px;
-            padding: 3px 8px;
-            white-space: nowrap;
-            flex-shrink: 0;
-          `;
-          executeBtn.textContent = '执行';
-          executeBtn.onclick = () => {
-            this.executeCommand(commandText);
-          };
-
           commandContainer.appendChild(commandCode);
-          commandContainer.appendChild(executeBtn);
           element.appendChild(commandContainer);
         }
       }
@@ -2401,180 +2392,6 @@ export class QuickDetectionManager {
       };
       document.addEventListener('keydown', handleEscape);
     });
-  }
-
-  /**
-   * 显示命令确认对话框
-   */
-  private async showConfirmDialog(command: string): Promise<boolean> {
-    // 构建命令显示的HTML
-    const commandHtml = `
-      <div style="
-        font-family: var(--font-mono, monospace);
-        font-size: 13px;
-        background: var(--bg-secondary);
-        padding: 12px;
-        border-radius: 6px;
-        color: var(--accent-color);
-        border-left: 3px solid var(--accent-color);
-        word-break: break-all;
-        white-space: pre-wrap;
-        margin-bottom: 12px;
-      ">${this.escapeHtml(command)}</div>
-      <div style="
-        padding: 10px 12px;
-        background: rgba(239, 68, 68, 0.1);
-        border-radius: 6px;
-        border-left: 3px solid #ef4444;
-      ">
-        <div style="font-weight: 500; color: #ef4444; margin-bottom: 6px; font-size: 12px;">⚠️ 重要提示</div>
-        <ul style="margin: 0; padding-left: 18px; font-size: 11px; color: var(--text-secondary); line-height: 1.6;">
-          <li>请确保您了解此命令的作用</li>
-          <li>命令将在SSH连接的服务器上执行</li>
-          <li>某些命令可能影响系统稳定性</li>
-        </ul>
-      </div>
-    `;
-
-    return this.showConfirm({
-      title: '确认执行命令',
-      message: commandHtml,
-      description: '此操作将在远程服务器上执行命令',
-      confirmText: '确认执行',
-      cancelText: '取消',
-      dangerous: true
-    });
-  }
-
-  /**
-   * 执行命令（带二级确认）
-   */
-  private async executeCommand(command: string): Promise<void> {
-    // 自定义二级确认对话框
-    const confirmed = await this.showConfirmDialog(command);
-
-    if (!confirmed) {
-      return;
-    }
-
-    // 显示执行结果的模态框
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 10001;
-      padding: 20px;
-    `;
-
-    modal.innerHTML = `
-      <div style="
-        background: var(--bg-primary);
-        border-radius: 12px;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-        max-width: 800px;
-        width: 100%;
-        max-height: 80vh;
-        display: flex;
-        flex-direction: column;
-      ">
-        <div style="
-          padding: 16px 20px;
-          border-bottom: 1px solid var(--border-color);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        ">
-          <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--text-primary);">命令执行结果</h3>
-          <button onclick="this.closest('div[style*=fixed]').remove()" style="
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            font-size: 24px;
-            cursor: pointer;
-            padding: 0;
-            width: 30px;
-            height: 30px;
-          ">×</button>
-        </div>
-        <div style="padding: 20px; overflow-y: auto; flex: 1;">
-          <div style="
-            font-family: var(--font-mono, monospace);
-            font-size: 12px;
-            background: var(--bg-secondary);
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-          ">
-            <div style="color: var(--text-secondary); margin-bottom: 4px;">$ ${command}</div>
-          </div>
-          <div id="command-output" style="
-            font-family: var(--font-mono, monospace);
-            font-size: 12px;
-            background: var(--bg-secondary);
-            padding: 12px;
-            border-radius: 6px;
-            min-height: 100px;
-            color: var(--text-primary);
-            white-space: pre-wrap;
-          ">正在执行命令...</div>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const outputElement = document.getElementById('command-output');
-    if (!outputElement) return;
-
-    try {
-      // 调用 Tauri 后端命令执行
-      const result = await invoke('execute_detection_command', { command });
-
-      // 显示执行结果
-      if (result && typeof result === 'object') {
-        const output = result as {
-          command: string;
-          output: string;
-          exit_code: number | null;
-          timestamp: string;
-        };
-
-        let outputHtml = '';
-
-        // 显示命令输出
-        if (output.output) {
-          outputHtml += `<div style="color: var(--text-primary);">${this.escapeHtml(output.output)}</div>`;
-        } else {
-          outputHtml += `<div style="color: var(--text-secondary);">命令执行完成，无输出</div>`;
-        }
-
-        // 显示退出码
-        if (output.exit_code !== null) {
-          const exitCodeColor = output.exit_code === 0 ? '#22c55e' : '#ef4444';
-          const exitCodeText = output.exit_code === 0 ? '成功' : '失败';
-          outputHtml += `<div style="color: ${exitCodeColor}; margin-top: 8px; font-size: 11px; font-weight: 500;">
-            ${exitCodeText} (退出码: ${output.exit_code})
-          </div>`;
-        }
-
-        outputElement.innerHTML = outputHtml;
-      } else {
-        outputElement.innerHTML = `<div style="color: var(--text-secondary);">命令执行完成</div>`;
-      }
-    } catch (error: any) {
-      outputElement.innerHTML = `
-        <div style="color: #ef4444;">❌ 执行失败</div>
-        <div style="margin-top: 8px; color: var(--text-secondary);">${this.escapeHtml(error.message || error.toString())}</div>
-      `;
-      console.error('命令执行失败:', error);
-    }
   }
 
   /**

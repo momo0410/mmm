@@ -148,14 +148,10 @@ async def _execute_independent_analysis(manager: SSHManager, path: str, action: 
         'dynamic-deps': f'ldd "{path}" 2>/dev/null',
         'config-references': f'grep -r "{path}" /etc/ 2>/dev/null | head -20',
         'symlink-analysis': f'ls -l "{path}" && readlink -f "{path}" 2>/dev/null',
-        'suspicious-path': f'echo "{path}" | grep -E \'(/tmp/|/dev/shm/|/var/tmp/|\\.\\.)\'',
-        'hidden-file': f'basename "{path}" | grep \'^\\.\'',
-        'suid-sgid': f'find "{path}" -perm /6000 -ls 2>/dev/null',
-        'webshell': f'grep -E \'(eval|base64_decode|system|exec|shell_exec|passthru)\' "{path}" 2>/dev/null',
-        'backdoor': f'grep -E \'(nc -e|/bin/bash|/bin/sh.*-i)\' "{path}" 2>/dev/null',
-        'crypto-mining': f'grep -E \'(xmrig|stratum|cryptonight|monero)\' "{path}" 2>/dev/null',
-        'reverse-shell': f'grep -E \'(bash -i|sh -i|nc.*-e|/dev/tcp/)\' "{path}" 2>/dev/null'
     }
+    suspicious_actions = {'suspicious-path', 'hidden-file', 'suid-sgid'}
+    if action in suspicious_actions:
+        return await _execute_suspicious_analysis(manager, path, action)
     cmd = commands.get(action)
     if not cmd:
         raise ValueError(f"未知的分析动作: {action}")
@@ -163,7 +159,76 @@ async def _execute_independent_analysis(manager: SSHManager, path: str, action: 
     return {
         "action": action,
         "file_path": path,
-        "result": result.output if result.exit_code == 0 else f"命令执行失败: {result.error}",
+        "result": result.output if result.exit_code == 0 else (result.output if result.output.strip() else "未检测到相关信息（可能需要 root 权限或该文件无此属性）"),
         "exit_code": result.exit_code,
         "timestamp": datetime.now(tz=timezone.utc).isoformat()
     }
+
+
+async def _execute_suspicious_analysis(manager: SSHManager, path: str, action: str) -> Dict[str, Any]:
+    now = datetime.now(tz=timezone.utc).isoformat()
+    base = {"action": action, "file_path": path, "exit_code": 0, "timestamp": now}
+
+    if action == "suspicious-path":
+        suspicious_patterns = {
+            "/tmp/": "临时目录",
+            "/dev/shm/": "共享内存目录",
+            "/var/tmp/": "持久临时目录",
+            "..": "路径穿越",
+        }
+        found = []
+        for pattern, desc in suspicious_patterns.items():
+            if pattern in path:
+                found.append(f"  匹配: {pattern} → {desc}")
+        if found:
+            base["result"] = f"检测到可疑路径特征:\n文件路径: {path}\n\n匹配项:\n" + "\n".join(found) + "\n\n建议: 该文件位于常见攻击者利用的目录中，请确认是否为合法文件。"
+        else:
+            base["result"] = f"路径安全\n文件路径: {path}\n\n未检测到可疑路径特征（/tmp/、/dev/shm/、/var/tmp/、路径穿越）。"
+        return base
+
+    if action == "hidden-file":
+        filename = path.rsplit("/", 1)[-1] if "/" in path else path
+        if filename.startswith("."):
+            base["result"] = f"检测到隐藏文件\n文件名: {filename}\n文件路径: {path}\n\n该文件以点号(.)开头，属于隐藏文件。\n\n常见隐藏文件:\n  .bash_history  - Shell 历史记录\n  .ssh/          - SSH 配置目录\n  .env           - 环境变量\n  .git/          - Git 仓库\n\n建议: 确认该隐藏文件是否为系统正常配置文件。"
+        else:
+            base["result"] = f"非隐藏文件\n文件名: {filename}\n文件路径: {path}\n\n该文件不以点号开头，不属于隐藏文件。"
+        return base
+
+    if action == "suid-sgid":
+        stat_cmd = f'stat -c "%a %F" "{path}" 2>/dev/null'
+        stat_result = await manager.execute_command(stat_cmd)
+        if stat_result.exit_code != 0 or not stat_result.output.strip():
+            find_cmd = f'find "{path}" -perm /6000 -ls 2>/dev/null'
+            find_result = await manager.execute_command(find_cmd)
+            if find_result.exit_code == 0 and find_result.output.strip():
+                base["result"] = f"检测到 SUID/SGID\n文件路径: {path}\n\n详细信息:\n{find_result.output}\n\nSUID/SGID 文件允许用户以文件所有者身份执行，可能被用于提权攻击。\n建议: 确认该权限设置是否必要。"
+            else:
+                base["result"] = f"未检测到 SUID/SGID\n文件路径: {path}\n\n该文件未设置 SUID 或 SGID 位，或需要 root 权限才能检测。"
+            return base
+
+        parts = stat_result.output.strip().split()
+        perm_str = parts[0] if len(parts) > 0 else ""
+        file_type = parts[1] if len(parts) > 1 else ""
+        try:
+            perm_int = int(perm_str, 8)
+            is_suid = bool(perm_int & 0o4000)
+            is_sgid = bool(perm_int & 0o2000)
+        except ValueError:
+            is_suid = False
+            is_sgid = False
+
+        lines = [f"文件路径: {path}", f"权限: {perm_str}  类型: {file_type}", ""]
+        if is_suid:
+            lines.append("SUID 位已设置 — 该文件以所有者身份执行，可能被用于提权！")
+        if is_sgid:
+            lines.append("SGID 位已设置 — 该文件以所属组身份执行，可能被用于提权！")
+        if not is_suid and not is_sgid:
+            lines.append("未设置 SUID 或 SGID 位。")
+        else:
+            lines.append("")
+            lines.append("建议: 确认 SUID/SGID 设置是否必要，常见合法 SUID 文件: passwd, sudo, ping")
+        base["result"] = "\n".join(lines)
+        return base
+
+    base["result"] = "未知检测类型"
+    return base

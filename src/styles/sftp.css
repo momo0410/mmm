@@ -6,12 +6,12 @@
 /* Container Layout */
 .sftp-page-container {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
   border-radius: var(--border-radius-lg);
   border: 1px solid var(--border-color);
-  overflow: hidden;
   box-shadow: var(--shadow-sm);
   transition: all 0.3s ease;
 }
@@ -105,6 +105,7 @@
 /* File List */
 .sftp-file-list-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: var(--bg-primary);
   position: relative;

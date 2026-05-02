@@ -54,6 +54,11 @@ export default defineConfig(async () => ({
         target: "http://127.0.0.1:3001",
         changeOrigin: true,
       },
+      "/ws": {
+        target: "ws://127.0.0.1:3001",
+        ws: true,
+        changeOrigin: true,
+      },
     },
     watch: {
       // 3. tell vite to ignore watching `src-tauri`
@@ -65,6 +70,11 @@ export default defineConfig(async () => ({
     proxy: {
       "/api/v1": {
         target: "http://127.0.0.1:3001",
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: "ws://127.0.0.1:3001",
+        ws: true,
         changeOrigin: true,
       },
     },

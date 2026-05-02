@@ -83,7 +83,6 @@ export class SSHConnectionManager {
         lastConnected: conn.last_connected ? new Date(conn.last_connected) : undefined,
         tags: conn.tags
       }));
-      console.log('✅ SSH连接配置已加载', this.connections.length, '个连接');
     } catch (error) {
       console.error('❌ 加载SSH连接配置失败:', error);
       this.connections = [];
@@ -125,7 +124,6 @@ export class SSHConnectionManager {
       }));
 
       await invoke('save_ssh_connections', { connections: backendConnections });
-      console.log('✅ SSH连接配置已保存');
     } catch (error) {
       console.error('❌ 保存SSH连接配置失败:', error);
       throw new Error(`保存SSH连接配置失败: ${error}`);
@@ -158,12 +156,10 @@ export class SSHConnectionManager {
     // 如果有密码，进行加密（主账号）
     if (connection.authType === 'password' && (connection as any).password) {
       try {
-        console.log('🔐 [添加连接] 正在加密主账号密码...');
         const encryptedPassword = await invoke('encrypt_password', {
           password: (connection as any).password
         }) as string;
         newConnection.encryptedPassword = encryptedPassword;
-        console.log('✅ [添加连接] 主账号密码加密成功');
       } catch (error) {
         console.error('❌ 密码加密失败:', error);
         throw new Error('密码加密失败');
@@ -172,7 +168,6 @@ export class SSHConnectionManager {
 
     // 加密额外账号的密码
     if (newConnection.accounts && newConnection.accounts.length > 0) {
-      console.log('🔐 [添加连接] 正在加密额外账号密码...');
       for (const account of newConnection.accounts) {
         if (account.authType === 'password' && (account as any).password) {
           try {
@@ -181,7 +176,6 @@ export class SSHConnectionManager {
             }) as string;
             account.encryptedPassword = encryptedPassword;
             delete (account as any).password; // 删除明文密码
-            console.log(`✅ 账号 ${account.username} 密码加密成功`);
           } catch (error) {
             console.error(`❌ 账号 ${account.username} 密码加密失败:`, error);
             throw new Error(`账号 ${account.username} 密码加密失败`);
@@ -193,7 +187,6 @@ export class SSHConnectionManager {
     this.connections.push(newConnection);
     await this.saveConnections();
 
-    console.log('✅ 新增SSH连接:', newConnection.name, '主账号加密密码:', newConnection.encryptedPassword ? '已设置' : '未设置', '额外账号数:', newConnection.accounts.length);
     return newConnection;
   }
 
@@ -217,24 +210,20 @@ export class SSHConnectionManager {
     // 如果更新了密码，需要重新加密（主账号）
     if (updates.authType === 'password' && (updates as any).password) {
       try {
-        console.log('🔐 [更新连接] 正在加密主账号密码...');
         const encryptedPassword = await invoke('encrypt_password', {
           password: (updates as any).password
         }) as string;
         updates.encryptedPassword = encryptedPassword;
         delete (updates as any).password; // 删除明文密码
-        console.log('✅ [更新连接] 主账号密码加密成功');
       } catch (error) {
         console.error('❌ 密码加密失败:', error);
         throw new Error('密码加密失败');
       }
     } else if ((updates as any).password === undefined || (updates as any).password === '') {
-      console.log('ℹ️ [更新连接] 密码为空，保持原有密码不变');
     }
 
     // 加密额外账号的密码
     if (updates.accounts && updates.accounts.length > 0) {
-      console.log('🔐 [更新连接] 正在加密额外账号密码...');
       for (const account of updates.accounts) {
         if (account.authType === 'password' && (account as any).password) {
           try {
@@ -243,7 +232,6 @@ export class SSHConnectionManager {
             }) as string;
             account.encryptedPassword = encryptedPassword;
             delete (account as any).password; // 删除明文密码
-            console.log(`✅ 账号 ${account.username} 密码加密成功`);
           } catch (error) {
             console.error(`❌ 账号 ${account.username} 密码加密失败:`, error);
             throw new Error(`账号 ${account.username} 密码加密失败`);
@@ -255,7 +243,6 @@ export class SSHConnectionManager {
     this.connections[index] = { ...this.connections[index], ...updates };
     await this.saveConnections();
 
-    console.log('✅ 更新SSH连接:', this.connections[index].name, '主账号加密密码:', this.connections[index].encryptedPassword ? '已设置' : '未设置', '额外账号数:', this.connections[index].accounts?.length || 0);
     return this.connections[index];
   }
 
@@ -268,8 +255,6 @@ export class SSHConnectionManager {
       throw new Error('连接不存在');
     }
 
-    const connection = this.connections[index];
-    
     // 如果是当前活动连接，先断开
     if (this.activeConnection?.id === id) {
       await this.disconnect();
@@ -278,7 +263,6 @@ export class SSHConnectionManager {
     this.connections.splice(index, 1);
     await this.saveConnections();
     
-    console.log('✅ 删除SSH连接:', connection.name);
   }
 
   /**
@@ -305,7 +289,6 @@ export class SSHConnectionManager {
     }
 
     try {
-      console.log(`🔗 正在连接到 ${connection.username}@${connection.host}:${connection.port}`);
       
       // 准备连接参数
       let password: string | undefined;
@@ -317,7 +300,7 @@ export class SSHConnectionManager {
       }
 
       // 调用后端SSH连接命令
-      const result = await invoke('ssh_connect_with_auth', {
+      await invoke('ssh_connect_with_auth', {
         host: connection.host,
         port: connection.port,
         username: connection.username,
@@ -335,7 +318,6 @@ export class SSHConnectionManager {
       
       await this.saveConnections();
       
-      console.log('✅ SSH连接成功:', result);
       
     } catch (error) {
       console.error('❌ SSH连接失败:', error);
@@ -359,7 +341,6 @@ export class SSHConnectionManager {
       
       await this.saveConnections();
       
-      console.log('✅ SSH连接已断开');
     } catch (error) {
       console.error('❌ 断开SSH连接失败:', error);
       throw new Error(`断开SSH连接失败: ${error}`);
@@ -488,7 +469,6 @@ export class SSHConnectionManager {
         await this.saveConnections();
       }
 
-      console.log(`✅ 导入了 ${importedCount} 个SSH连接`);
       return importedCount;
     } catch (error) {
       console.error('❌ 导入SSH连接失败:', error);

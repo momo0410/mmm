@@ -5,6 +5,7 @@
 
 import * as IconPark from '@icon-park/svg'
 import { aiService } from '../ai/aiService'
+import { renderAIAnalysisContent } from '../utils/aiProxy'
 
 export class LogContextMenu {
   private contextMenu: HTMLElement | null = null
@@ -175,7 +176,7 @@ export class LogContextMenu {
           </div>
 
           <!-- AI 解释区域 -->
-          <div id="log-ai-section" class="ai-section" style="display: none;">
+          <div id="log-context-ai-section" class="ai-section" style="display: none;">
             <div style="
               font-size: 12px; 
               color: var(--text-secondary); 
@@ -195,7 +196,7 @@ export class LogContextMenu {
               border-radius: var(--border-radius);
               border: 1px solid rgba(59, 130, 246, 0.2);
             ">
-              <div id="log-ai-content" style="
+              <div id="log-context-ai-content" style="
                 font-size: 13px;
                 line-height: 1.6;
                 color: var(--text-primary);
@@ -305,8 +306,8 @@ export class LogContextMenu {
     if (!this.modal) return
 
     const contentEl = document.getElementById('log-original-content')
-    const aiSection = document.getElementById('log-ai-section')
-    const aiContent = document.getElementById('log-ai-content')
+    const aiSection = document.getElementById('log-context-ai-section')
+    const aiContent = document.getElementById('log-context-ai-content')
 
     if (contentEl) contentEl.textContent = this.currentLogContent
     if (aiSection) aiSection.style.display = 'block'
@@ -315,22 +316,30 @@ export class LogContextMenu {
     this.modal.style.display = 'flex'
 
     try {
+      if (!aiService.isConfigured()) {
+        throw new Error('AI 服务未配置，请先在设置中填写模型信息')
+      }
+
+      let accumulatedText = ''
       await aiService.analyzeLogStream(
         this.currentLogContent,
         undefined,
         (chunk) => {
-          if (aiContent && aiContent.textContent?.startsWith('🤔')) {
-            aiContent.textContent = ''
+          accumulatedText += chunk
+          if (aiContent) {
+            aiContent.textContent = accumulatedText
           }
-          if (aiContent) aiContent.textContent += chunk
         },
-        () => {
+        (finalText) => {
+          if (aiContent) {
+            renderAIAnalysisContent(aiContent, finalText)
+          }
           console.log('AI 分析完成')
         }
       )
     } catch (error) {
       if (aiContent) {
-        aiContent.innerHTML = `<span style="color: var(--error-color)">❌ 分析失败: ${error instanceof Error ? error.message : String(error)}</span><br><br><small>请检查设置 -> AI 配置 是否正确？?/small>`
+        aiContent.innerHTML = `<span style="color: var(--error-color)">❌ 分析失败: ${error instanceof Error ? error.message : String(error)}</span><br><br><small>请检查设置 -> AI 配置 是否正确？</small>`
       }
     }
   }
@@ -342,7 +351,7 @@ export class LogContextMenu {
     if (this.modal) {
       this.modal.style.display = 'none'
       // 清空内容
-      const aiContent = document.getElementById('log-ai-content')
+      const aiContent = document.getElementById('log-context-ai-content')
       if (aiContent) aiContent.textContent = ''
     }
   }

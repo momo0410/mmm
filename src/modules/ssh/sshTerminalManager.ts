@@ -92,13 +92,11 @@ export class SSHTerminalManager {
     if (container) {
       (container as HTMLElement).style.display = 'flex';
       (container as HTMLElement).style.flexDirection = 'column';
-      console.log('🔧 设置容器显示样式:', (container as HTMLElement).style.cssText);
     } else {
       console.error('❌ 未找到SSH容器，无法显示');
     }
 
     this.isVisible = true;
-    console.log('✅ SSH 终端组件已显示（内嵌方案，会话持久）');
 
     // 触发一次 resize，帮助 xterm 自适应
     setTimeout(() => {
@@ -116,7 +114,6 @@ export class SSHTerminalManager {
     }
 
     this.isVisible = false;
-    console.log('✅ SSH 终端组件已隐藏（会话保持）');
   }
 
   /**
@@ -168,13 +165,10 @@ export class SSHTerminalManager {
     const noVueApp = this.vueApp === null;
     const containerChanged = this.containerElement !== container;
 
-    console.log(`🔍 ensure: 检查终端状态 - Vue应用: ${noVueApp ? '无' : '有'}, 容器为空: ${emptyContainer}, 容器变化: ${containerChanged}, 子元素数: ${container.childElementCount}`);
 
     if (noVueApp || emptyContainer) {
-      console.log('🔧 ensure: 终端需要重新挂载（Vue应用丢失或容器为空）');
       // 如果Vue应用存在但容器为空，先卸载再重新挂载
       if (this.vueApp && emptyContainer) {
-        console.log('🔧 ensure: 卸载现有Vue应用');
         this.unmountTerminal();
       }
       this.mountTerminal();
@@ -183,10 +177,8 @@ export class SSHTerminalManager {
 
     // 更新容器引用
     this.containerElement = container;
-    console.log('✅ ensure: 终端状态正常，会话保持');
 
     if (containerChanged || emptyContainer) {
-      console.log(`🔁 ensure: 检测到需要重挂载（containerChanged=${containerChanged}, empty=${emptyContainer}）`);
       this.unmountTerminal();
       setTimeout(() => this.mountTerminal(), 0);
       return;

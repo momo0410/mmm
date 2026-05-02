@@ -50,16 +50,50 @@ def _parse_log_line(line: str) -> LogAnalysisEntry:
     line_lower = line.lower()
     highlighted = any(kw in line_lower for kw in HIGHLIGHT_KEYWORDS)
     level = "info"
-    priority_match = re.match(r'^<(\d+)>', line)
+    priority_match = re.match(r'^(\d+)>', line)
     if priority_match:
         priority_num = int(priority_match.group(1))
         severity = priority_num & 0x07
         level = JOURNALCTL_PRIORITY_MAP.get(str(severity), "info")
     else:
-        if any(kw in line_lower for kw in ["error", "critical", "emergency", "alert"]):
-            level = "error"
-        elif any(kw in line_lower for kw in ["warning", "warn"]):
-            level = "warning"
+        # 尝试从行中提取显式的日志级别标记
+        # 支持多种常见格式:
+        # - "2025-03-18 01:57:53,789 INFO ..."
+        # - "[ERROR] ..."
+        # - "level=error ..."
+        # - "status: warning ..."
+        # 使用更精确的模式，避免匹配到单词中间
+        level_patterns = [
+            # 方括号包裹: [ERROR], [WARN], [INFO]
+            r'\[(error|err|critical|crit|emergency|emerg|alert|fatal|warning|warn|info|information|debug|trace)\]',
+            # 等号格式: level=error, level=info
+            r'level[=:]\s*(error|err|critical|crit|emergency|emerg|alert|fatal|warning|warn|info|information|debug|trace)',
+            # 空格分隔的级别标记（在时间戳后）
+            r'\d{2}:\d{2}:\d{2}[\.,\d]*\s+(error|err|critical|crit|emergency|emerg|alert|fatal|warning|warn|info|information|debug|trace)\b',
+            # 通用单词边界匹配（优先级最低）
+            r'\b(error|err|critical|crit|emergency|emerg|alert|fatal|warning|warn|info|information|debug|trace)\b',
+        ]
+        level_match = None
+        for pattern in level_patterns:
+            level_match = re.search(pattern, line_lower)
+            if level_match:
+                break
+        if level_match:
+            matched = level_match.group(1)
+            if matched in ("error", "err", "critical", "crit", "emergency", "emerg", "alert", "fatal"):
+                level = "error"
+            elif matched in ("warning", "warn"):
+                level = "warning"
+            elif matched in ("info", "information"):
+                level = "info"
+            elif matched in ("debug", "trace"):
+                level = "debug"
+        else:
+            # 回退到关键词检测（仅当整行包含明确的错误/警告关键词时）
+            if any(kw in line_lower for kw in ["critical", "emergency", "alert"]):
+                level = "error"
+            elif "warning" in line_lower:
+                level = "warning"
     timestamp = None
     ts_match = re.match(r'^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})', line)
     if ts_match:
@@ -137,6 +171,12 @@ def _generate_list_log_files_command() -> str:
     )
 def _generate_log_file_info_command(log_path: str) -> str:
     return f"stat -c 'size:%s|modified:%Y' '{log_path}' 2>/dev/null || echo 'readable:no'"
+def _parse_level_filter(level_filter: Optional[str]) -> Optional[List[str]]:
+    """解析日志级别过滤字符串，如 'error,warning' -> ['error', 'warning']"""
+    if not level_filter:
+        return None
+    levels = [lvl.strip().lower() for lvl in level_filter.split(',') if lvl.strip()]
+    return levels if levels else None
 async def read_system_log(
     manager: SSHManager,
     log_path: str,
@@ -144,27 +184,32 @@ async def read_system_log(
     page_size: int = 100,
     filter_text: Optional[str] = None,
     date_filter: Optional[str] = None,
+    level_filter: Optional[str] = None,
 ) -> LogAnalysisOutput:
     if not manager.is_connected():
         raise ConnectionError("没有活动的 SSH 连接")
-    cmd = _generate_log_read_command(log_path, page, page_size, filter_text, date_filter)
+    # 为了支持级别过滤后的正确分页，先读取足够多的原始数据
+    max_lines = page * page_size
+    cmd = _generate_log_read_command(log_path, 1, max_lines, filter_text, date_filter)
     print(f"[log_analysis] 读取系统日志: {cmd}")
     output = await manager.execute_command(cmd)
     if output.exit_code and output.exit_code != 0:
         print(f"[log_analysis] 退出码: {output.exit_code}")
     entries = []
+    allowed_levels = _parse_level_filter(level_filter)
+    print(f"[log_analysis] level_filter={level_filter}, allowed_levels={allowed_levels}")
     for line in output.output.split("\n"):
         line = line.strip()
         if not line or "Log file not found" in line or "No matching entries" in line:
             continue
-        entries.append(_parse_log_line(line))
+        entry = _parse_log_line(line)
+        if allowed_levels and entry.level not in allowed_levels:
+            print(f"[log_analysis] 过滤掉 level={entry.level}, allowed={allowed_levels}, line={line[:60]}")
+            continue
+        entries.append(entry)
     print(f"[log_analysis] 解析到 {len(entries)} 条日志")
-    highlighted_count = sum(1 for e in entries if e.highlighted)
-    return LogAnalysisOutput(
-        total_count=len(entries),
-        highlighted_count=highlighted_count,
-        entries=entries,
-    )
+    # 分页返回
+    return _paginate_and_return(entries, page, page_size)
 async def read_journalctl_log(
     manager: SSHManager,
     page: int = 1,
@@ -173,6 +218,7 @@ async def read_journalctl_log(
     filter_text: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    level_filter: Optional[str] = None,
 ) -> LogAnalysisOutput:
     if not manager.is_connected():
         raise ConnectionError("没有活动的 SSH 连接")
@@ -182,12 +228,13 @@ async def read_journalctl_log(
     entries = []
     if not raw_output or "no entries" in raw_output.lower():
         return LogAnalysisOutput(total_count=0, highlighted_count=0, entries=[])
+    allowed_levels = _parse_level_filter(level_filter)
     try:
         data_array = json.loads(raw_output)
         if isinstance(data_array, list):
             for item in data_array:
                 parsed = _parse_journalctl_json_line(json.dumps(item))
-                if parsed:
+                if parsed and (not allowed_levels or parsed.level in allowed_levels):
                     entries.append(parsed)
             if entries:
                 print(f"[log_analysis] 方法1: 解析为 JSON 数组，共 {len(entries)} 条")
@@ -205,7 +252,7 @@ async def read_journalctl_log(
                 break
             obj, end = decoder.raw_decode(raw_output, pos)
             parsed = _parse_journalctl_json_line(json.dumps(obj))
-            if parsed:
+            if parsed and (not allowed_levels or parsed.level in allowed_levels):
                 entries.append(parsed)
             pos = end
         if entries:
@@ -220,7 +267,7 @@ async def read_journalctl_log(
             if not line:
                 continue
             parsed = _parse_journalctl_json_line(line)
-            if parsed:
+            if parsed and (not allowed_levels or parsed.level in allowed_levels):
                 entries.append(parsed)
         if entries:
             print(f"[log_analysis] 方法3: json-seq 格式解析，共 {len(entries)} 条")
@@ -233,7 +280,7 @@ async def read_journalctl_log(
         try:
             obj = json.loads(block)
             parsed = _parse_journalctl_json_line(json.dumps(obj))
-            if parsed:
+            if parsed and (not allowed_levels or parsed.level in allowed_levels):
                 entries.append(parsed)
         except (json.JSONDecodeError, ValueError):
             continue

@@ -84,13 +84,6 @@ const ALL_NAV_ITEMS: NavigationItem[] = [
     visibleInModes: ['classic']
   },
   {
-    id: 'database',
-    title: '数据库',
-    description: '数据库管理',
-    iconKey: 'Data',
-    visibleInModes: ['classic']
-  },
-  {
     id: 'log-analysis',
     title: '日志审计',
     description: '系统日志分析与溯源',
@@ -114,7 +107,6 @@ const NAV_ORDER: Record<UIMode, AppPage[]> = {
     'remote-operations',
     'emergency-commands',
     'quick-detection',
-    'database',
     'log-analysis',
     'payloader',
     'ssh-terminal'
@@ -126,7 +118,6 @@ const NAV_ORDER: Record<UIMode, AppPage[]> = {
     'remote-operations',
     'emergency-commands',
     'quick-detection',
-    'database',
     'log-analysis',
     'payloader',
     'ssh-terminal'

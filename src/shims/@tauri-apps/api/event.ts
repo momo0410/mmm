@@ -1,133 +1,73 @@
 /**
  * @tauri-apps/api/event shim
- * 将 Tauri 事件系统替换为基于 WebSocket 的实现
+ * 在纯 Web/Python 模式下提供最小事件能力。
  */
 
-type EventCallback<T = any> = (event: { event: string; id: number; payload: T }) => void;
+export type UnlistenFn = () => void;
 
-// 事件监听器存储
-const listeners: Map<string, Set<EventCallback>> = new Map();
-
-// WebSocket 连接（可选，用于服务端推送）
-let ws: WebSocket | null = null;
-let wsConnected = false;
-
-const WS_URL = 'ws://127.0.0.1:3001/ws/events';
-
-/**
- * 初始化 WebSocket 事件连接
- */
-function initWebSocket() {
-  if (ws) return;
-
-  try {
-    ws = new WebSocket(WS_URL);
-    ws.onopen = () => {
-      wsConnected = true;
-      console.log('[event-shim] WebSocket 事件通道已连接');
-    };
-    ws.onmessage = (msg) => {
-      try {
-        const data = JSON.parse(msg.data);
-        if (data.type && data.type !== 'pong') {
-          _emitLocal(data.type, data.payload);
-        }
-      } catch {}
-    };
-    ws.onclose = () => {
-      wsConnected = false;
-      ws = null;
-      // 3秒后重连
-      setTimeout(initWebSocket, 3000);
-    };
-    ws.onerror = () => {};
-  } catch {
-    // WebSocket 不可用时静默失败
-  }
+export interface TauriEvent<T = unknown> {
+  event: string;
+  id: number;
+  payload: T;
 }
 
-/**
- * 内部触发本地事件
- */
-function _emitLocal(event: string, payload?: any) {
-  const cbs = listeners.get(event);
-  if (cbs) {
-    const id = Date.now();
-    cbs.forEach(cb => {
-      try {
-        cb({ event, id, payload });
-      } catch (e) {
-        console.error(`[event-shim] 事件回调错误:`, e);
-      }
-    });
-  }
+export type EventCallback<T = unknown> = (event: TauriEvent<T>) => void;
+
+const THEME_STORAGE_KEY = 'LERT-theme';
+const CUSTOM_EVENT_PREFIX = '__tauri_event__:';
+let eventId = 0;
+
+function getCustomEventName(event: string): string {
+  return `${CUSTOM_EVENT_PREFIX}${event}`;
 }
 
-/**
- * 监听事件
- */
-export async function listen<T = any>(
-  event: string,
-  handler: EventCallback<T>
-): Promise<() => void> {
-  if (!listeners.has(event)) {
-    listeners.set(event, new Set());
-  }
-  listeners.get(event)!.add(handler as EventCallback);
+function nextEventId(): number {
+  eventId += 1;
+  return eventId;
+}
 
-  // 尝试初始化 WebSocket
-  initWebSocket();
+function buildEvent<T>(event: string, payload: T): TauriEvent<T> {
+  return {
+    event,
+    id: nextEventId(),
+    payload,
+  };
+}
 
-  // 返回取消监听函数
+export async function listen<T = unknown>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+  const customEventName = getCustomEventName(event);
+
+  const onCustomEvent = (rawEvent: Event) => {
+    const payload = (rawEvent as CustomEvent<T>).detail;
+    handler(buildEvent(event, payload));
+  };
+
+  const onStorageEvent = (storageEvent: StorageEvent) => {
+    if (event !== 'theme-changed') return;
+    if (storageEvent.key !== THEME_STORAGE_KEY) return;
+    if (!storageEvent.newValue) return;
+    handler(buildEvent(event, storageEvent.newValue as T));
+  };
+
+  window.addEventListener(customEventName, onCustomEvent as EventListener);
+  window.addEventListener('storage', onStorageEvent);
+
   return () => {
-    const cbs = listeners.get(event);
-    if (cbs) {
-      cbs.delete(handler as EventCallback);
-      if (cbs.size === 0) {
-        listeners.delete(event);
-      }
-    }
+    window.removeEventListener(customEventName, onCustomEvent as EventListener);
+    window.removeEventListener('storage', onStorageEvent);
   };
 }
 
-/**
- * 监听一次性事件
- */
-export async function once<T = any>(
-  event: string,
-  handler: EventCallback<T>
-): Promise<() => void> {
-  const wrappedHandler: EventCallback<T> = (e) => {
-    handler(e);
+export async function once<T = unknown>(event: string, handler: EventCallback<T>): Promise<UnlistenFn> {
+  let unlisten: UnlistenFn = () => {};
+  unlisten = await listen<T>(event, (payloadEvent) => {
     unlisten();
-  };
-
-  const unlisten = await listen(event, wrappedHandler);
+    handler(payloadEvent);
+  });
   return unlisten;
 }
 
-/**
- * 触发事件（发送到服务端 + 本地广播）
- */
-export async function emit(event: string, payload?: any): Promise<void> {
-  // 本地广播
-  _emitLocal(event, payload);
-
-  // 尝试通过 WebSocket 发送到服务端
-  if (ws && wsConnected) {
-    try {
-      ws.send(JSON.stringify({ type: event, payload }));
-    } catch {}
-  }
-}
-
-/**
- * 触发事件到指定窗口（在纯 Web 模式下等同于 emit）
- */
-export async function emitTo(
-  _target: string,
-  event: string,
-  payload?: any
-): Promise<void> {
-  return emit(event, payload);
+export async function emit<T = unknown>(event: string, payload?: T): Promise<void> {
+  const customEventName = getCustomEventName(event);
+  window.dispatchEvent(new CustomEvent(customEventName, { detail: payload }));
 }

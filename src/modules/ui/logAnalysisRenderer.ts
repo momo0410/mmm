@@ -24,15 +24,16 @@ interface LogEntry {
 }
 
 export class LogAnalysisRenderer {
-  private currentLogPath: string = '/var/log/auth.log';
+  private currentLogPath: string = '/var/log/tuned/tuned.log';
   private currentLines: number = 100;
   private currentFilter: string = '';
   private useJournalctl: boolean = false;
   private journalUnit: string = '';
   
-  // 新增状态
   private currentPage: number = 1;
   private currentDate: string = '';
+  private multiSelectEnabled: boolean = false;
+  private currentLevelFilter: string = '';
 
   /**
    * 渲染日志审计页面
@@ -42,6 +43,7 @@ export class LogAnalysisRenderer {
       <div class="log-analysis-page">
         <div class="log-analysis-container">
           ${this.renderToolbar()}
+          ${this.renderBatchActionBar()}
           ${this.renderLogContent()}
           ${this.renderPagination()}
         </div>
@@ -84,15 +86,37 @@ export class LogAnalysisRenderer {
           </div>
 
           ${!this.useJournalctl ? this.renderFileSelector() : this.renderJournalInput()}
+
+          <div class="toolbar-divider"></div>
+
+          <div class="level-filter-wrapper">
+            <select 
+              class="toolbar-select level-select" 
+              id="log-level-select"
+              onchange="window.updateLogLevelFilter(this.value)"
+            >
+              <option value="" ${!this.currentLevelFilter ? 'selected' : ''}>全部级别</option>
+              <option value="error" ${this.currentLevelFilter === 'error' ? 'selected' : ''}>ERROR</option>
+              <option value="warning" ${this.currentLevelFilter === 'warning' ? 'selected' : ''}>WARNING</option>
+              <option value="info" ${this.currentLevelFilter === 'info' ? 'selected' : ''}>INFO</option>
+              <option value="debug" ${this.currentLevelFilter === 'debug' ? 'selected' : ''}>DEBUG</option>
+            </select>
+          </div>
         </div>
 
         <div class="toolbar-right">
           <button
-            class="modern-btn log-ai-btn"
-            id="log-ai-analyze-btn"
-            onclick="window.analyzeLoadedLogsWithAI()"
-            title="分析当前已加载日志"
-          >AI分析</button>
+            class="modern-btn log-multi-select-btn ${this.multiSelectEnabled ? 'active' : ''}"
+            id="log-multi-select-btn"
+            onclick="window.toggleLogMultiSelect()"
+            title="多选模式 (Ctrl/Shift 快捷键)"
+          >
+            <svg width="14" height="14" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" y="6" width="36" height="36" rx="4" stroke="currentColor" stroke-width="4"/>
+              <path d="M16 24L22 30L34 18" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            多选
+          </button>
 
           <div class="date-picker-wrapper">
             ${Calendar({ theme: 'outline', size: '16', fill: 'currentColor' })}
@@ -175,28 +199,61 @@ export class LogAnalysisRenderer {
   }
 
   /**
+   * 渲染批量操作栏
+   */
+  private renderBatchActionBar(): string {
+    return `
+      <div class="log-batch-action-bar" id="log-batch-action-bar" style="display: none;">
+        <div class="batch-action-left">
+          <span class="batch-select-count" id="batch-select-count">已选择 0 条</span>
+          <button class="batch-action-link" onclick="window.selectAllLogEntries()">全选</button>
+          <button class="batch-action-link" onclick="window.clearLogSelection()">取消选择</button>
+        </div>
+        <div class="batch-action-right">
+          <button class="modern-btn batch-btn" onclick="window.copySelectedLogEntries()" title="复制选中日志">
+            <svg width="14" height="14" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="16" y="16" width="24" height="24" rx="4" stroke="currentColor" stroke-width="4"/>
+              <path d="M32 12V10C32 7.79 30.21 6 28 6H10C7.79 6 6 7.79 6 10V28C6 30.21 7.79 32 10 32H12" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+            复制
+          </button>
+          <button class="modern-btn batch-btn batch-ai-btn" onclick="window.analyzeSelectedLogEntries()" title="AI分析选中日志">
+            AI分析选中
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
    * 渲染文件选择器
    */
   private renderFileSelector(): string {
+    const options = [
+      { value: '/var/log/auth.log', label: '认证日志 (auth.log)' },
+      { value: '/var/log/secure', label: '安全日志 (secure)' },
+      { value: '/var/log/syslog', label: '系统日志 (syslog)' },
+      { value: '/var/log/messages', label: '系统消息 (messages)' },
+      { value: '/var/log/kern.log', label: '内核日志 (kern.log)' },
+      { value: '/var/log/cron', label: '计划任务日志 (cron)' },
+      { value: '/var/log/audit/audit.log', label: '审计日志 (audit.log)' },
+      { value: '/var/log/boot.log', label: '启动日志 (boot.log)' },
+      { value: '/var/log/dmesg', label: '设备消息 (dmesg)' },
+      { value: '/var/log/faillog', label: '失败登录 (faillog)' },
+      { value: '/var/log/tuned/tuned.log', label: '调优日志 (tuned.log)' },
+    ];
+
     return `
       <div class="selector-wrapper">
         <select 
           class="toolbar-select" 
           id="log-file-select"
-          value="${this.currentLogPath}"
           onchange="window.updateLogPath(this.value)"
         >
           <optgroup label="系统日志">
-            <option value="/var/log/auth.log">认证日志 (auth.log)</option>
-            <option value="/var/log/secure">安全日志 (secure)</option>
-            <option value="/var/log/syslog">系统日志 (syslog)</option>
-            <option value="/var/log/messages">系统消息 (messages)</option>
-            <option value="/var/log/kern.log">内核日志 (kern.log)</option>
-            <option value="/var/log/cron">计划任务日志 (cron)</option>
-            <option value="/var/log/audit/audit.log">审计日志 (audit.log)</option>
-            <option value="/var/log/boot.log">启动日志 (boot.log)</option>
-            <option value="/var/log/dmesg">设备消息 (dmesg)</option>
-            <option value="/var/log/faillog">失败登录 (faillog)</option>
+            ${options.map(opt => 
+              `<option value="${opt.value}" ${opt.value === this.currentLogPath ? 'selected' : ''}>${opt.label}</option>`
+            ).join('')}
           </optgroup>
         </select>
       </div>
@@ -371,5 +428,13 @@ export class LogAnalysisRenderer {
    */
   setJournalUnit(unit: string): void {
     this.journalUnit = unit;
+  }
+
+  setMultiSelectEnabled(enabled: boolean): void {
+    this.multiSelectEnabled = enabled;
+  }
+
+  setLevelFilter(level: string): void {
+    this.currentLevelFilter = level;
   }
 }

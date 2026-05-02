@@ -45,7 +45,10 @@ def get_app_data_dir() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path.home() / ".local" / "share"
-    app_data_dir = base / "lovelyres"
+    app_data_dir = base / "sdit"
+    legacy_app_data_dir = base / "lovelyres"
+    if not app_data_dir.exists() and legacy_app_data_dir.exists():
+        shutil.copytree(legacy_app_data_dir, app_data_dir, dirs_exist_ok=True)
     app_data_dir.mkdir(parents=True, exist_ok=True)
     return app_data_dir
 def get_settings_file_path() -> Path:

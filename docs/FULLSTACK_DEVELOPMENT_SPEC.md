@@ -1,6 +1,6 @@
 # Vue 3 + FastAPI 开发规范
 
-> **项目**: LovelyRes - Linux Emergency Response Tool  
+> **项目**: SDIT - Linux Emergency Response Tool  
 > **技术栈**: Vue 3 + TypeScript + Vite + Python FastAPI  
 > **版本**: 2.1.0  
 > **更新日期**: 2026-04-20
@@ -25,7 +25,7 @@
 ### 1.1 目录结构
 
 ```
-LovelyERes/
+SDIT/
 ├── src/                          # 前端源码
 │   ├── components/               # Vue 组件
 │   │   └── SSHTerminal.vue      # SSH 终端组件
@@ -640,4 +640,4 @@ npm run lint            # ESLint 检查
 ---
 
 **最后更新**: 2026-04-15  
-**维护者**: LovelyRes Team
+**维护者**: SDIT Team

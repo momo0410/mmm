@@ -23,6 +23,8 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
   private fileList: SftpFileInfo[] = [];
   private sortMode: 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'modified-asc' | 'modified-desc' = 'name-asc';
   private collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true, ignorePunctuation: true });
+  private hasLoadedOnce = false;
+  private lastLoadError: string | null = null;
 
   /**
    * 设置排序方式，目录始终排在文件之前
@@ -89,11 +91,15 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
   /**
    * 刷新当前目录
    */
-  async refreshCurrentDirectory(): Promise<void> {
+  async refreshCurrentDirectory(): Promise<boolean> {
     try {
-      await this.refreshFileList();
+      return await this.refreshFileList();
     } catch (error) {
       console.error('刷新目录失败:', error);
+      this.lastLoadError = error instanceof Error ? error.message : String(error);
+      this.hasLoadedOnce = false;
+      this.notifyListeners();
+      return false;
     }
   }
 
@@ -151,10 +157,14 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
   /**
    * 刷新文件列表
    */
-  async refreshFileList(): Promise<void> {
+  async refreshFileList(): Promise<boolean> {
     if (!sshConnectionManager.isConnected()) {
       console.warn('SSH未连接，无法刷新SFTP文件列表');
-      return;
+      this.fileList = [];
+      this.hasLoadedOnce = false;
+      this.lastLoadError = 'SSH未连接';
+      this.notifyListeners();
+      return false;
     }
 
     try {
@@ -163,22 +173,36 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
       });
 
       this.fileList = this.sortFiles(files);
+      this.hasLoadedOnce = true;
+      this.lastLoadError = null;
       this.notifyListeners();
 
       // 更新SSH活动时间
       sshConnectionManager.updateLastActivity();
+      return true;
 
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      // SSH连接关闭/未连接等状态类错误静默处理，不弹提示
-      if (errMsg.includes('SSH connection closed') || errMsg.includes('没有活动的 SSH 连接')) {
-        console.warn('[SFTP] 连接已断开，跳过文件列表刷新');
+      const isConnectionError = /SSH connection closed|没有活动的 SSH 连接|not connected|connection lost|broken pipe|EOF|reset/i.test(errMsg);
+      // SSH连接关闭/未连接等状态类错误静默处理，同时主动同步一次后端连接状态
+      if (isConnectionError) {
+        try {
+          await sshConnectionManager.checkConnectionStatus(true);
+        } catch {
+          // 忽略状态同步失败，保持前端降级可用
+        }
         this.fileList = [];
+        this.hasLoadedOnce = false;
+        this.lastLoadError = errMsg;
         this.notifyListeners();
-        return;
+        return false;
       }
       console.error('获取SFTP文件列表失败:', error);
+      this.lastLoadError = errMsg;
+      this.hasLoadedOnce = false;
+      this.notifyListeners();
       (window as any).showNotification && (window as any).showNotification(`获取文件列表失败: ${error}`, 'error');
+      return false;
     }
   }
 
@@ -230,8 +254,18 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
    * 渲染文件列表HTML（返回<tr>行，供#sftp-file-list tbody插入）
    */
   renderFileListHTML(): string {
+    const updateCount = (count: number) => {
+      setTimeout(() => {
+        const countEl = document.getElementById('sftp-status-count');
+        if (countEl) {
+          countEl.innerHTML = `<span>${count} 项</span>`;
+        }
+      }, 0);
+    };
+
     // 未连接时显示一行提示
     if (!sshConnectionManager.isConnected()) {
+      updateCount(0);
       return `
         <tr>
           <td colspan="4" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 13px;">
@@ -244,8 +278,37 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
       `;
     }
 
+    if (this.lastLoadError && this.fileList.length === 0) {
+      updateCount(0);
+      return `
+        <tr>
+          <td colspan="4" style="padding: 40px; text-align: center; color: var(--warning-color, #e6a23c); font-size: 13px;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+              <div style="font-size: 24px; opacity: 0.7;">⚠️</div>
+              <span>SFTP 列目录失败，请点击“刷新”重试</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    if (!this.hasLoadedOnce && this.fileList.length === 0) {
+      updateCount(0);
+      return `
+        <tr>
+          <td colspan="4" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 13px;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+              <div style="font-size: 24px; opacity: 0.5;">🧭</div>
+              <span>尚未加载目录，请点击“刷新”</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
     // 空目录
     if (this.fileList.length === 0) {
+      updateCount(0);
       return `
         <tr>
           <td colspan="4" style="padding: 40px; text-align: center; color: var(--text-secondary); font-size: 13px;">
@@ -289,12 +352,7 @@ export class SftpManager extends EventEmitter<[SftpFileInfo[], string]> {
     });
 
     // Update status bar count if element exists
-    setTimeout(() => {
-      const countEl = document.getElementById('sftp-status-count');
-      if (countEl) {
-        countEl.innerHTML = `<span>${sortedFiles.length} 项</span>`;
-      }
-    }, 0);
+    updateCount(sortedFiles.length);
 
     return html;
   }

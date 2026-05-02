@@ -240,6 +240,14 @@ export class CompressModal {
     this.currentSourcePath = '';
   }
 
+  private joinRemotePath(dir: string, name: string): string {
+    const normalizedDir = (dir || '/').replace(/\/+$/, '') || '/';
+    if (normalizedDir === '/') {
+      return `/${name}`;
+    }
+    return `${normalizedDir}/${name}`;
+  }
+
   private updateTargetFileName(): void {
     const formatSelect = document.getElementById('compress-format') as HTMLSelectElement;
     const targetNameInput = document.getElementById('compress-target-name') as HTMLInputElement;
@@ -302,7 +310,7 @@ export class CompressModal {
       console.warn('无法获取目标目录，使用默认目录:', e);
     }
 
-    const targetPath = `${targetDir}/${targetName}`;
+    const targetPath = this.joinRemotePath(targetDir, targetName);
 
     // 显示处理中状态
     confirmBtn.textContent = '打包中...';

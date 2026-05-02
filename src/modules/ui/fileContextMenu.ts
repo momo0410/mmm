@@ -6,7 +6,6 @@ import { invoke } from '../../shims/@tauri-apps/api/core'
 import { marked } from 'marked'
 import { aiService } from '../ai/aiService'
 
-// 命令历史记录接口
 interface CommandHistory {
   timestamp: string
   action: string
@@ -17,27 +16,171 @@ interface CommandHistory {
   result: string
 }
 
+const MODAL_ID = 'file-analysis-modal'
+const MODAL_TITLE_ID = 'file-analysis-modal-title'
+const MODAL_CONTENT_ID = 'file-analysis-modal-content'
+const AI_EXPLANATION_ID = 'file-analysis-ai-explanation'
+const AI_EXPLANATION_CONTENT_ID = 'file-analysis-ai-explanation-content'
+const AI_ANALYZE_BTN_ID = 'file-analysis-ai-analyze-btn'
+
 export class FileContextMenu {
   private commandHistory: CommandHistory[] = []
   private currentFilePath: string = ''
   private currentAnalysisType: string = ''
   private currentAnalysisResult: string = ''
+  private modalCreated: boolean = false
 
   constructor() {
     this.setupEventListeners()
-    console.log('📁 FileContextMenu 已加载（复用 processContextMenu 模态框，提供复制/AI 解释功能）')
+    console.log('FileContextMenu 已加载')
   }
 
-  /**
-   * 设置事件监听器
-   */
-  private setupEventListeners() {
-    // AI 解释按钮
+  private ensureModal(): void {
+    if (this.modalCreated && document.getElementById(MODAL_ID)) {
+      return
+    }
+
+    const existing = document.getElementById(MODAL_ID)
+    if (existing) {
+      existing.remove()
+    }
+
+    const modal = document.createElement('div')
+    modal.id = MODAL_ID
+    modal.style.cssText = `
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+    `
+
+    modal.innerHTML = `
+      <div style="
+        background: var(--bg-primary, #1e1e2e);
+        border: 1px solid var(--border-color, #45475a);
+        border-radius: 12px;
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+        max-width: 800px;
+        width: 90vw;
+        max-height: 85vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      ">
+        <div style="
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 20px;
+          border-bottom: 1px solid var(--border-color, #45475a);
+        ">
+          <h3 id="${MODAL_TITLE_ID}" style="
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary, #cdd6f4);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+          "></h3>
+          <div style="display: flex; align-items: center; gap: 8px; margin-left: 12px;">
+            <button id="${AI_ANALYZE_BTN_ID}" style="
+              background: linear-gradient(135deg, #8b5cf6, #6366f1);
+              color: white;
+              border: none;
+              padding: 6px 14px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 12px;
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              white-space: nowrap;
+            ">🤖 AI解释</button>
+            <button id="file-analysis-modal-close" style="
+              background: none;
+              border: 1px solid var(--border-color, #45475a);
+              color: var(--text-secondary, #a6adc8);
+              padding: 4px 10px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 13px;
+            ">✕</button>
+          </div>
+        </div>
+        <div style="
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px 20px;
+        ">
+          <pre id="${MODAL_CONTENT_ID}" style="
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary, #cdd6f4);
+            background: var(--bg-secondary, #181825);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color, #45475a);
+          "></pre>
+          <div id="${AI_EXPLANATION_ID}" style="display: none; margin-top: 12px;">
+            <div style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-bottom: 8px;
+              padding-bottom: 8px;
+              border-bottom: 1px solid var(--border-color, #45475a);
+            ">
+              <span style="font-size: 16px;">🤖</span>
+              <span style="font-weight: 600; color: var(--text-primary, #cdd6f4);">AI 安全分析</span>
+            </div>
+            <div id="${AI_EXPLANATION_CONTENT_ID}" style="
+              color: var(--text-primary, #cdd6f4);
+              font-size: 13px;
+              line-height: 1.6;
+            "></div>
+          </div>
+        </div>
+      </div>
+    `
+
+    document.body.appendChild(modal)
+
+    document.getElementById('file-analysis-modal-close')?.addEventListener('click', () => {
+      this.hideModal()
+    })
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        this.hideModal()
+      }
+    })
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') {
+        this.hideModal()
+      }
+    })
+
+    this.modalCreated = true
+  }
+
+  private setupEventListeners(): void {
     document.addEventListener('click', (e) => {
       const target = e.target as HTMLElement
-      if (target.id === 'ai-analyze-btn' || target.closest('#ai-analyze-btn')) {
-        // 检查当前是否是文件分析模态框
-        const modal = document.getElementById('process-detail-modal')
+      if (target.id === AI_ANALYZE_BTN_ID || target.closest(`#${AI_ANALYZE_BTN_ID}`)) {
+        const modal = document.getElementById(MODAL_ID)
         if (modal && modal.style.display === 'flex' && this.currentFilePath) {
           this.analyzeWithAI()
         }
@@ -45,58 +188,47 @@ export class FileContextMenu {
     })
   }
 
-  /**
-   * 显示模态框（复用 processContextMenu 的模态框）
-   */
-  private showModal(title: string, content: string) {
-    const modal = document.getElementById('process-detail-modal')
-    const titleEl = document.getElementById('modal-title')
-    const contentEl = document.getElementById('modal-content')
-    const explanationEl = document.getElementById('ai-explanation')
+  private showModal(title: string, content: string): void {
+    this.ensureModal()
+
+    const modal = document.getElementById(MODAL_ID)
+    const titleEl = document.getElementById(MODAL_TITLE_ID)
+    const contentEl = document.getElementById(MODAL_CONTENT_ID)
+    const explanationEl = document.getElementById(AI_EXPLANATION_ID)
 
     if (!modal || !titleEl || !contentEl) {
-      console.error('❌ [FileContextMenu] 找不到 processContextMenu 的模态框元素')
+      console.error('[FileContextMenu] 模态框元素创建失败')
       return
     }
 
-    // 设置标题和内容
     titleEl.textContent = title
     contentEl.textContent = content
 
-    // 隐藏AI分析区域（每次显示新内容时重置）
     if (explanationEl) {
       explanationEl.style.display = 'none'
-      const explanationContentEl = document.getElementById('ai-explanation-content')
+      const explanationContentEl = document.getElementById(AI_EXPLANATION_CONTENT_ID)
       if (explanationContentEl) {
         explanationContentEl.textContent = ''
       }
     }
 
-    // 显示模态框
     modal.style.display = 'flex'
   }
 
-  /**
-   * 关闭模态框
-   */
-  public hideModal() {
-    const modal = document.getElementById('process-detail-modal')
+  public hideModal(): void {
+    const modal = document.getElementById(MODAL_ID)
     if (modal) {
       modal.style.display = 'none'
     }
   }
 
-  /**
-   * 执行文件分析命令（使用独立 session）
-   */
-  private async executeAnalysis(action: string, filePath: string) {
+  private async executeAnalysis(action: string, filePath: string): Promise<string> {
     try {
       const result = await invoke('sftp_file_analysis_independent', {
         action,
         path: filePath
       }) as any
 
-      // 添加到历史记录
       this.addToHistory(result)
 
       return result.result as string
@@ -105,36 +237,30 @@ export class FileContextMenu {
     }
   }
 
-  /**
-   * 添加到历史记录
-   */
-  private addToHistory(data: any) {
+  private addToHistory(data: any): void {
+    if (!data || !data.action || !data.file_path) {
+      return
+    }
     const actionName = this.getActionName(data.action)
     const fileName = data.file_path.split('/').pop() || data.file_path
 
-    // 保存到历史记录数组
     const historyItem: CommandHistory = {
-      timestamp: data.timestamp,
+      timestamp: data.timestamp || new Date().toISOString(),
       action: data.action,
       actionName: actionName,
       filePath: data.file_path,
       fileName: fileName,
       command: this.getCommandForAction(data.action, data.file_path),
-      result: data.result
+      result: data.result || ''
     }
 
-    // 插入到数组开头
     this.commandHistory.unshift(historyItem)
 
-    // 限制历史记录数量（最多保留 50 条）
     if (this.commandHistory.length > 50) {
       this.commandHistory.pop()
     }
   }
 
-  /**
-   * 获取动作对应的命令
-   */
   private getCommandForAction(action: string, filePath: string): string {
     const commands: Record<string, string> = {
       'hash': `md5sum "${filePath}" && sha1sum "${filePath}" && sha256sum "${filePath}"`,
@@ -159,38 +285,11 @@ export class FileContextMenu {
       'dynamic-deps': `ldd "${filePath}" 2>/dev/null`,
       'config-references': `grep -r "${filePath}" /etc/ 2>/dev/null | head -20`,
       'symlink-analysis': `ls -l "${filePath}" && readlink -f "${filePath}"`,
-      'suspicious-path': `echo "${filePath}" | grep -E '(/tmp/|/dev/shm/|/var/tmp/|\\.\\.)'`,
-      'hidden-file': `basename "${filePath}" | grep '^\\.'`,
-      'suid-sgid': `find "${filePath}" -perm /6000 -ls`,
-      'webshell': `grep -E '(eval|base64_decode|system|exec|shell_exec|passthru)' "${filePath}"`,
-      'backdoor': `grep -E '(nc -e|/bin/bash|/bin/sh.*-i)' "${filePath}"`,
-      'crypto-mining': `grep -E '(xmrig|stratum|cryptonight|monero)' "${filePath}"`,
-      'reverse-shell': `grep -E '(bash -i|sh -i|nc.*-e|/dev/tcp/)' "${filePath}"`
     }
     return commands[action] || `未知命令: ${action}`
   }
 
-  /**
-   * 显示历史记录模态框
-   */
-  public showHistoryModal() {
-    const modal = document.getElementById('process-detail-modal')
-    const titleEl = document.getElementById('modal-title')
-    const contentEl = document.getElementById('modal-content')
-    const explanationEl = document.getElementById('ai-explanation')
-
-    if (!modal || !titleEl || !contentEl || !explanationEl) {
-      console.error('模态框元素不存在')
-      return
-    }
-
-    // 设置标题
-    titleEl.textContent = '📋 命令执行历史'
-
-    // 隐藏 AI 解释区域
-    explanationEl.style.display = 'none'
-
-    // 生成历史记录 HTML
+  public showHistoryModal(): void {
     let historyHTML = ''
 
     if (this.commandHistory.length === 0) {
@@ -208,7 +307,7 @@ export class FileContextMenu {
         font-size: 13px;
         transition: all 0.3s;
       " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-        🗑️ 清空历史
+        清空历史
       </button>`
       historyHTML += '</div>'
 
@@ -242,10 +341,8 @@ export class FileContextMenu {
       historyHTML += '</div>'
     }
 
-    // 显示模态框
-    this.showModal('📋 命令执行历史', historyHTML)
+    this.showModal('命令执行历史', historyHTML)
 
-    // 绑定清空按钮事件
     const clearBtn = document.getElementById('clear-history-btn')
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
@@ -257,18 +354,12 @@ export class FileContextMenu {
     }
   }
 
-  /**
-   * HTML 转义
-   */
   private escapeHtml(text: string): string {
     const div = document.createElement('div')
     div.textContent = text
     return div.innerHTML
   }
 
-  /**
-   * 获取动作的中文名称
-   */
   private getActionName(action: string): string {
     const names: Record<string, string> = {
       'hash': '哈希值',
@@ -292,81 +383,68 @@ export class FileContextMenu {
       'selinux-context': 'SELinux',
       'dynamic-deps': '动态依赖',
       'config-references': '配置引用',
-      'symlink-analysis': '符号链接',
-      'suspicious-path': '可疑路径',
-      'hidden-file': '隐藏文件',
-      'suid-sgid': 'SUID/SGID',
-      'webshell': 'Webshell',
-      'backdoor': '后门',
-      'crypto-mining': '挖矿',
-      'reverse-shell': '反弹Shell'
+      'symlink-analysis': '符号链接'
     }
     return names[action] || action
   }
 
-  /**
-   * 处理菜单项点击
-   */
-  public async handleAction(action: string, filePath: string, menuItem: HTMLElement) {
+  public async handleAction(action: string, filePath: string, menuItem?: HTMLElement): Promise<void> {
+    const actionName = this.getActionName(action)
+    const originalText = menuItem?.getAttribute('data-original-text') || menuItem?.textContent || actionName
+
     try {
-      // 禁用菜单项
-      menuItem.style.opacity = '0.5'
-      menuItem.style.pointerEvents = 'none'
-      menuItem.textContent = '⏳ 执行中...'
+      if (menuItem) {
+        if (!menuItem.getAttribute('data-original-text')) {
+          menuItem.setAttribute('data-original-text', originalText)
+        }
+        menuItem.style.opacity = '0.5'
+        menuItem.style.pointerEvents = 'none'
+        menuItem.textContent = '⏳ 执行中...'
+      }
 
-      // 获取动作名称
-      const actionName = this.getActionName(action)
-
-      // 执行分析命令（使用独立 session）
       const result = await this.executeAnalysis(action, filePath)
 
-      // 保存当前分析信息，供 AI 解释使用
       this.currentFilePath = filePath
       this.currentAnalysisType = actionName
       this.currentAnalysisResult = result
 
-      // 显示结果（复用 processContextMenu 的模态框）
       const displayTitle = `${actionName} - ${filePath.split('/').pop()}`
-      const displayContent = result
+      this.showModal(displayTitle, result)
 
-      // 更新模态框内容（showModal 会自动隐藏 AI 解释区域）
-      this.showModal(displayTitle, displayContent)
-
-      // 重新启用菜单项
-      menuItem.style.opacity = '1'
-      menuItem.style.pointerEvents = 'auto'
-      menuItem.textContent = menuItem.getAttribute('data-original-text') || actionName
+      if (menuItem) {
+        menuItem.style.opacity = '1'
+        menuItem.style.pointerEvents = 'auto'
+        menuItem.textContent = originalText
+      }
 
     } catch (error) {
-      console.error(`文件分析失败:`, error)
+      console.error('文件分析失败:', error)
       this.showModal('错误', `文件分析失败: ${error}`)
 
-      // 重新启用菜单项
-      menuItem.style.opacity = '1'
-      menuItem.style.pointerEvents = 'auto'
-      menuItem.textContent = menuItem.getAttribute('data-original-text') || '重试'
+      if (menuItem) {
+        menuItem.style.opacity = '1'
+        menuItem.style.pointerEvents = 'auto'
+        menuItem.textContent = originalText || '重试'
+      }
     }
   }
 
-  /**
-   * 使用 AI 解释分析结果（复用 processContextMenu 的 AI 解释区域）
-   */
-  private async analyzeWithAI() {
+  private async analyzeWithAI(): Promise<void> {
     if (!this.currentFilePath || !this.currentAnalysisResult) {
       console.warn('没有可分析的内容')
       return
     }
 
-    // 显示 AI 解释区域
-    const explanationEl = document.getElementById('ai-explanation')
-    const explanationContentEl = document.getElementById('ai-explanation-content')
+    this.ensureModal()
+
+    const explanationEl = document.getElementById(AI_EXPLANATION_ID)
+    const explanationContentEl = document.getElementById(AI_EXPLANATION_CONTENT_ID)
 
     if (!explanationEl || !explanationContentEl) {
       console.error('找不到 AI 解释区域')
       return
     }
 
-    // 显示加载状态
     explanationEl.style.display = 'block'
     explanationContentEl.innerHTML = '<div style="text-align: center; padding: 20px;"><span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> 正在分析...</div>'
 
@@ -375,7 +453,6 @@ export class FileContextMenu {
       return
     }
 
-    // 构建提示词
     const prompt = `你是一个 Linux 安全专家和应急响应专家。
 
 ## 任务
@@ -400,13 +477,9 @@ ${this.currentAnalysisResult}
 请使用清晰的 Markdown 格式，确保内容结构化、易读。`
 
     try {
-      // 清空"正在分析"提示
       explanationContentEl.innerHTML = ''
 
-      // 累积内容
       let accumulatedContent = ''
-
-      // 使用节流更新，避免闪烁（每 100ms 更新一次）
       let lastUpdateTime = 0
       const updateUI = (content: string) => {
         const now = Date.now()
@@ -427,7 +500,6 @@ ${this.currentAnalysisResult}
         }
       )
 
-      // 确保最后一次更新
       explanationContentEl.innerHTML = this.renderMarkdown(accumulatedContent)
 
     } catch (error) {
@@ -439,27 +511,20 @@ ${this.currentAnalysisResult}
     }
   }
 
-  /**
-   * Markdown 渲染器（使用 marked.js）
-   */
   private renderMarkdown(text: string): string {
     try {
-      // 检查 marked.js 是否已加载
       if (typeof marked === 'undefined') {
         console.warn('marked.js 未加载，使用简单渲染')
         return this.simpleMarkdownRender(text)
       }
 
-      // 配置 marked
       marked.setOptions({
-        gfm: true,  // 支持 GFM 换行
-        breaks: true,  // 启用 GitHub Flavored Markdown
+        gfm: true,
+        breaks: true,
       })
 
-      // 渲染 Markdown
       const html = marked.parse(text)
 
-      // 添加自定义样式
       return `<style>
         .ai-content h1, .ai-content h2, .ai-content h3 { color: var(--text-primary); margin: 12px 0 8px 0; }
         .ai-content h1 { font-size: 1.4em; }
@@ -486,9 +551,6 @@ ${this.currentAnalysisResult}
     }
   }
 
-  /**
-   * 简单 Markdown 渲染（降级方案）
-   */
   private simpleMarkdownRender(text: string): string {
     return text
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -501,7 +563,6 @@ ${this.currentAnalysisResult}
   }
 }
 
-// 全局实例（用于从其他模块访问）
 declare global {
   interface Window {
     fileContextMenu: FileContextMenu

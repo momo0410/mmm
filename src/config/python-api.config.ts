@@ -246,6 +246,10 @@ class PythonApi {
     return this.request('GET', '/ssh/connection-status');
   }
 
+  async sshGetConnectionHealth() {
+    return this.request('GET', '/ssh/connection-health');
+  }
+
   async testSshPerformance() {
     const result = await this.request('POST', '/ssh/test-performance');
     return result.result;
@@ -279,10 +283,12 @@ class PythonApi {
     return this.request('POST', '/sftp/upload', { local_path: localPath, remote_path: remotePath });
   }
 
-  async sftpUploadDirect(file: File, remotePath: string) {
+  async sftpUploadDirect(file: File, remotePath: string, uploadId: string) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('remote_path', remotePath);
+    formData.append('upload_id', uploadId);
+    formData.append('file_size', String(file.size));
 
     const url = `${this.baseUrl}/sftp/upload-direct`;
     const response = await fetch(url, {
@@ -306,6 +312,20 @@ class PythonApi {
     }
 
     return await response.json();
+  }
+
+  async sftpGetUploadProgress(uploadId: string) {
+    return this.request<{
+      upload_id: string;
+      stage: string;
+      transferred_bytes: number;
+      total_bytes: number;
+      percent: number;
+      done: boolean;
+      success: boolean;
+      error?: string | null;
+      updated_at: number;
+    }>('GET', '/sftp/upload-progress', undefined, { upload_id: uploadId });
   }
 
   async sftpDownload(remotePath: string, localPath: string) {
@@ -414,17 +434,17 @@ class PythonApi {
 
   // ==================== 日志分析 ====================
 
-  async readSystemLog(params: { logPath: string; page?: number; pageSize?: number; filter?: string; dateFilter?: string }) {
+  async readSystemLog(params: { logPath: string; page?: number; pageSize?: number; filter?: string; dateFilter?: string; levelFilter?: string }) {
     return this.request('POST', '/log/read-system', {
       log_path: params.logPath, page: params.page, page_size: params.pageSize,
-      filter: params.filter, date_filter: params.dateFilter,
+      filter: params.filter, date_filter: params.dateFilter, level_filter: params.levelFilter,
     });
   }
 
-  async readJournalctlLog(params: { page?: number; pageSize?: number; unit?: string; filter?: string; since?: string; until?: string }) {
+  async readJournalctlLog(params: { page?: number; pageSize?: number; unit?: string; filter?: string; since?: string; until?: string; levelFilter?: string }) {
     return this.request('POST', '/log/read-journalctl', {
       page: params.page, page_size: params.pageSize, unit: params.unit,
-      filter: params.filter, since: params.since, until: params.until,
+      filter: params.filter, since: params.since, until: params.until, level_filter: params.levelFilter,
     });
   }
 
@@ -442,6 +462,13 @@ class PythonApi {
     target: string;
     max_rounds?: number;
     dry_run?: boolean;
+    execution_mode?: 'serial' | 'parallel';
+    skill_query?: string;
+    skill_limit?: number;
+    llm_max_tokens?: number;
+    llm_timeout_seconds?: number;
+    llm_max_retries?: number;
+    llm_retry_backoff_seconds?: number;
     api_key: string;
     model: string;
     base_url: string;
@@ -452,12 +479,36 @@ class PythonApi {
       target: params.target,
       max_rounds: params.max_rounds ?? 30,
       dry_run: params.dry_run ?? false,
+      execution_mode: params.execution_mode ?? 'parallel',
+      skill_query: params.skill_query ?? '',
+      skill_limit: params.skill_limit ?? 5,
+      llm_max_tokens: params.llm_max_tokens ?? 600,
+      llm_timeout_seconds: params.llm_timeout_seconds ?? 60,
+      llm_max_retries: params.llm_max_retries ?? 1,
+      llm_retry_backoff_seconds: params.llm_retry_backoff_seconds ?? 1.2,
       api_key: params.api_key,
       model: params.model,
       base_url: params.base_url,
       provider: params.provider,
       temperature: params.temperature ?? 0.3,
     });
+  }
+
+  async pentestDoctor(refresh: boolean = false) {
+    return this.request<{
+      generated_at: string;
+      summary: { ok: number; warn: number; error: number; total: number };
+      tools: Array<{
+        tool: string;
+        status: 'ok' | 'warn' | 'error';
+        binary: string;
+        binary_path: string | null;
+        version: string;
+        help_probe_ok: boolean;
+        issues: string[];
+        auto_fixes: string[];
+      }>;
+    }>('GET', '/agent/pentest/doctor', undefined, { refresh });
   }
 
   async pentestStatus(taskId: string) {
@@ -471,6 +522,7 @@ class PythonApi {
       actions_count: number;
       actions: Array<{tool: string; args: string; time: string; result: string}>;
       task_id: string;
+      error?: string;
     }>('GET', '/agent/pentest/status', undefined, { task_id: taskId });
   }
 
@@ -502,6 +554,12 @@ class PythonApi {
         error: string;
         status?: string;
         updated_at?: string;
+        surface?: string;
+        purpose?: string;
+        round?: number;
+        task_label?: string;
+        ports?: number[];
+        capabilities?: string[];
       }>;
       task_id: string;
     }>('GET', '/agent/pentest/logs', undefined, { task_id: taskId });

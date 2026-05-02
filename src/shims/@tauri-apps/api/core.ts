@@ -63,6 +63,7 @@ export async function invoke<T = any>(cmd: string, args?: Record<string, any>): 
     execute_detection_command: () => pythonApi.executeDetectionCommand(args?.command),
 
     ssh_get_connection_status: () => pythonApi.sshGetConnectionStatus(),
+    ssh_get_connection_health: () => pythonApi.sshGetConnectionHealth(),
     test_ssh_performance: () => pythonApi.testSshPerformance(),
     diagnose_shell_performance: () => pythonApi.diagnoseShellPerformance(),
     detect_system_type: () => pythonApi.detectSystemType(),
@@ -72,7 +73,7 @@ export async function invoke<T = any>(cmd: string, args?: Record<string, any>): 
     sftp_read_file: () => pythonApi.sftpReadFile(args?.path, args?.max_bytes),
     sftp_write_file: () => pythonApi.sftpWriteFile(args?.path, args?.content),
     sftp_upload: () => pythonApi.sftpUpload(args?.local_path ?? args?.localPath, args?.remote_path ?? args?.remotePath),
-    sftp_upload_direct: () => pythonApi.sftpUploadDirect(args?.file, args?.remote_path ?? args?.remotePath),
+    sftp_upload_direct: () => pythonApi.sftpUploadDirect(args?.file, args?.remote_path ?? args?.remotePath, args?.upload_id ?? args?.uploadId),
     sftp_download: () => pythonApi.sftpDownload(args?.remote_path ?? args?.remotePath, args?.local_path ?? args?.localPath),
     sftp_create_directory: () => pythonApi.sftpCreateDirectory(args?.remote_path ?? args?.remotePath),
     sftp_compress: () => pythonApi.sftpCompress(args?.source_path, args?.target_path, args?.format),
@@ -123,7 +124,7 @@ export async function invoke<T = any>(cmd: string, args?: Record<string, any>): 
       console.log('[core.ts] ssh_create_terminal_session called with args:', args);
       return pythonApi.sshCreateTerminalSession(args?.terminal_id, args?.cols, args?.rows);
     },
-    ssh_close_terminal_session: () => pythonApi.sshCloseTerminalSession(args?.terminal_id),
+    ssh_close_terminal_session: () => pythonApi.sshCloseTerminalSession(args?.terminal_id ?? args?.terminalId),
     ssh_close_all_terminal_sessions: () => pythonApi.sshCloseAllTerminalSessions(),
     ssh_send_input: () => pythonApi.sshSendInput(args?.terminal_id ?? args?.terminalId, args?.data),
     ssh_get_completion: () => pythonApi.sshGetCompletion(args?.input),
@@ -135,6 +136,7 @@ export async function invoke<T = any>(cmd: string, args?: Record<string, any>): 
       pageSize: args?.page_size ?? args?.pageSize,
       filter: args?.filter,
       dateFilter: args?.date_filter ?? args?.dateFilter,
+      levelFilter: args?.level_filter ?? args?.levelFilter,
     }),
     read_journalctl_log: () => pythonApi.readJournalctlLog({
       page: args?.page,
@@ -143,6 +145,7 @@ export async function invoke<T = any>(cmd: string, args?: Record<string, any>): 
       filter: args?.filter,
       since: args?.since,
       until: args?.until,
+      levelFilter: args?.level_filter ?? args?.levelFilter,
     }),
     list_log_files: () => pythonApi.listLogFiles(),
     get_log_file_info: () => pythonApi.getLogFileInfo(args?.log_path),

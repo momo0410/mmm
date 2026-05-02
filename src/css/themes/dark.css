@@ -1,4 +1,4 @@
-/* 深色主题 - LovelyRes */
+/* 深色主题 - SDIT */
 /* 护眼舒适的深色主题配色 */
 
 [data-theme="dark"] {
@@ -29,6 +29,15 @@
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"],
+body[data-theme="dark"],
+html[data-theme="dark"] body,
+html[data-theme="dark"] #app,
+body.dark-theme,
+body.dark-theme #app {
+  background: var(--bg-primary) !important;
 }
 
 /* 深色主题特定样式 */

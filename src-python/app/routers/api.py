@@ -6,9 +6,12 @@ import time
 import asyncio
 import logging
 logger = logging.getLogger(__name__)
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Literal
+from urllib.parse import urlparse
 import asyncssh
+import httpx
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from app.models.types import (
     SSHConnection,
@@ -29,7 +32,7 @@ from app.services.device_info import get_device_uuid
 from app.services.window_manager import WindowManager
 from app.utils.crypto import get_rsa_public_key
 from app.utils.system_fonts import get_system_fonts
-router = APIRouter(prefix="/api/v1", tags=["lovelyres"])
+router = APIRouter(prefix="/api/v1", tags=["sdit"])
 T = TypeVar("T")
 async def _wrap_ssh_transport(factory: Callable[[], Awaitable[T]]) -> T:
     try:
@@ -51,13 +54,41 @@ _window_manager: Optional[WindowManager] = None
 """桌面窗口管理器单例，支持最小化、最大化、关闭及开发者工具等窗口操作。"""
 _app_settings: Optional[AppSettings] = None
 """应用设置单例（主题、语言、快捷键等），启动时从本地配置文件加载。"""
+_sftp_upload_progress: Dict[str, Dict[str, Any]] = {}
+"""SFTP 上传进度缓存，按 upload_id 记录当前阶段与字节进度。"""
+
+
+def _set_sftp_upload_progress(
+    upload_id: str,
+    *,
+    stage: str,
+    transferred_bytes: int,
+    total_bytes: int,
+    done: bool = False,
+    success: bool = False,
+    error: Optional[str] = None,
+) -> None:
+    safe_total = max(int(total_bytes or 0), 0)
+    safe_transferred = max(0, min(int(transferred_bytes or 0), safe_total if safe_total > 0 else int(transferred_bytes or 0)))
+    percent = 100.0 if done and success else (safe_transferred / safe_total * 100 if safe_total > 0 else 0.0)
+    _sftp_upload_progress[upload_id] = {
+        "upload_id": upload_id,
+        "stage": stage,
+        "transferred_bytes": safe_transferred,
+        "total_bytes": safe_total,
+        "percent": percent,
+        "done": done,
+        "success": success,
+        "error": error,
+        "updated_at": time.time(),
+    }
 def init_state():
     global _ssh_manager, _ssh_connection_manager, _window_manager, _app_settings
     _ssh_manager = SSHManager()
     _ssh_connection_manager = SSHConnectionManager()
     _window_manager = WindowManager()
     _app_settings = load_settings()
-    print("LovelyRes Python 后端初始化完成")
+    print("SDIT Python 后端初始化完成")
 def get_ssh_manager() -> SSHManager:
     if _ssh_manager is None:
         raise HTTPException(status_code=500, detail="SSH管理器未初始化")
@@ -205,6 +236,43 @@ class SaveSettingsRequest(BaseModel):
 class WriteSettingsFileRequest(BaseModel):
     content: str
     """配置文件的原始文本内容"""
+class RemediationBudgetRequest(BaseModel):
+    max_steps: int = 5
+    """允许的总步骤数"""
+    max_mutation_steps: int = 2
+    """允许的变更类步骤数"""
+    max_ssh_commands: int = 4
+    """允许的 SSH 命令数"""
+    max_http_requests: int = 0
+    """预留的 HTTP 请求预算"""
+class SelectedRemediationFinding(BaseModel):
+    finding_id: str
+    """漏洞或修复项 ID"""
+    title: str
+    """前端展示标题"""
+    commands: List[str] = Field(default_factory=list)
+    """执行修复时要运行的命令"""
+    verify_commands: List[str] = Field(default_factory=list)
+    """修复后验证命令"""
+    rollback_commands: List[str] = Field(default_factory=list)
+    """回滚命令"""
+class ExecuteSelectedRemediationsRequest(BaseModel):
+    task: str
+    """执行任务标题"""
+    dry_run: bool = False
+    """是否仅预览不真实执行"""
+    auto_approve: bool = False
+    """是否自动批准高风险步骤"""
+    approval_ids: List[str] = Field(default_factory=list)
+    """审批票据 ID"""
+    approved_finding_ids: List[str] = Field(default_factory=list)
+    """已批准的 finding ID"""
+    rollback_mode: str = "none"
+    """回滚模式: none / preview / execute"""
+    budget: RemediationBudgetRequest = Field(default_factory=RemediationBudgetRequest)
+    """执行预算"""
+    selected_findings: List[SelectedRemediationFinding] = Field(default_factory=list)
+    """需要执行的修复项"""
 class EncryptPasswordRequest(BaseModel):
     password: str
     """明文密码"""
@@ -222,6 +290,8 @@ class ReadSystemLogRequest(BaseModel):
     """关键字过滤（grep 风格），为 None 时不过滤"""
     date_filter: Optional[str] = None
     """日期过滤（格式如 "2024-01-01"），为 None 时不过滤"""
+    level_filter: Optional[str] = None
+    """日志级别过滤（如 "error,warning"），为 None 时不过滤"""
 class ReadJournalctlLogRequest(BaseModel):
     page: int = 1
     """页码，从 1 开始"""
@@ -235,6 +305,8 @@ class ReadJournalctlLogRequest(BaseModel):
     """起始时间（如 "2024-01-01" 或 "1 hour ago"）"""
     until: Optional[str] = None
     """截止时间（如 "2024-01-02"）"""
+    level_filter: Optional[str] = None
+    """日志级别过滤（如 "error,warning"），为 None 时不过滤"""
 class FileAnalysisRequest(BaseModel):
     path: str
     """远程服务器上的文件绝对路径"""
@@ -260,6 +332,174 @@ class SaveDialogRequest(BaseModel):
     """文件类型过滤器列表"""
     default_path: Optional[str] = None
     """对话框打开时的默认路径和默认文件名"""
+class AIChatProxyRequest(BaseModel):
+    url: str
+    """目标 AI 接口地址"""
+    headers: Dict[str, str] = Field(default_factory=dict)
+    """请求头（Authorization / x-api-key 等）"""
+    body: Dict[str, Any] = Field(default_factory=dict)
+    """请求体（兼容 OpenAI / Claude / Ollama）"""
+    timeout_seconds: float = 90.0
+    """超时时间（秒）"""
+def _validate_proxy_target_url(raw_url: str) -> str:
+    url = (raw_url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="AI 目标 URL 不能为空")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="AI 目标 URL 仅支持 http/https")
+    if not parsed.netloc:
+        raise HTTPException(status_code=400, detail="AI 目标 URL 缺少主机名")
+    return url
+def _normalize_timeout(timeout_seconds: float) -> httpx.Timeout:
+    value = float(timeout_seconds or 90.0)
+    if value <= 0:
+        value = 90.0
+    connect_timeout = min(30.0, max(5.0, value / 3))
+    return httpx.Timeout(timeout=value, connect=connect_timeout)
+def _normalize_proxy_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        k = str(key).strip()
+        if not k:
+            continue
+        kl = k.lower()
+        if kl in ("host", "content-length"):
+            continue
+        normalized[k] = str(value)
+    return normalized
+def _extract_error_detail_from_text(raw: str, fallback: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return fallback
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return text
+    if isinstance(parsed, dict):
+        detail = parsed.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+        message = parsed.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+        error = parsed.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+        if isinstance(error, dict):
+            nested = error.get("message") or error.get("detail") or error.get("error")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+        return json.dumps(parsed, ensure_ascii=False)
+    return text
+async def _read_upstream_error_detail(response: httpx.Response) -> str:
+    fallback = f"HTTP {response.status_code}"
+    try:
+        raw = await response.aread()
+    except Exception:
+        return fallback
+    text = raw.decode("utf-8", errors="ignore")
+    return _extract_error_detail_from_text(text, fallback)
+def _read_json_or_text(response: httpx.Response) -> Any:
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            return response.json()
+        except Exception:
+            pass
+    text = response.text if response.text is not None else ""
+    text = text.strip()
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except Exception:
+        return {"text": text}
+def _build_approval_ticket(task: str, finding: SelectedRemediationFinding) -> Dict[str, Any]:
+    ticket_id = f"approval-{finding.finding_id}-{time.time_ns()}"
+    return {
+        "id": ticket_id,
+        "finding_id": finding.finding_id,
+        "title": finding.title,
+        "task": task,
+        "status": "draft",
+    }
+def _is_remediation_approved(
+    req: ExecuteSelectedRemediationsRequest,
+    finding: SelectedRemediationFinding,
+) -> bool:
+    if req.auto_approve:
+        return True
+    if finding.finding_id in req.approved_finding_ids:
+        return True
+    if finding.finding_id in req.approval_ids:
+        return True
+    return False
+def _safe_get_remediation_ssh() -> tuple[Optional[Any], Optional[str]]:
+    try:
+        return get_ssh_manager(), None
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return None, detail
+    except Exception as exc:
+        return None, str(exc)
+def _is_ssh_connected_for_remediation(ssh: Any) -> bool:
+    if ssh is None:
+        return False
+    checker = getattr(ssh, "is_connected", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker())
+    except Exception:
+        return False
+def _build_budget_snapshot(
+    budget: RemediationBudgetRequest,
+    finding: SelectedRemediationFinding,
+    rollback_mode: str,
+) -> Dict[str, int]:
+    if rollback_mode == "execute":
+        requested_steps = len(finding.rollback_commands)
+        requested_mutation_steps = len(finding.rollback_commands)
+        requested_ssh_commands = len(finding.rollback_commands)
+    else:
+        requested_steps = len(finding.commands) + len(finding.verify_commands)
+        requested_mutation_steps = len(finding.commands)
+        requested_ssh_commands = requested_steps
+    return {
+        "max_steps": budget.max_steps,
+        "max_mutation_steps": budget.max_mutation_steps,
+        "max_ssh_commands": budget.max_ssh_commands,
+        "max_http_requests": budget.max_http_requests,
+        "requested_steps": requested_steps,
+        "requested_mutation_steps": requested_mutation_steps,
+        "requested_ssh_commands": requested_ssh_commands,
+        "requested_http_requests": 0,
+    }
+def _budget_violation(snapshot: Dict[str, int]) -> Optional[str]:
+    checks = (
+        ("max_steps", "requested_steps"),
+        ("max_mutation_steps", "requested_mutation_steps"),
+        ("max_ssh_commands", "requested_ssh_commands"),
+        ("max_http_requests", "requested_http_requests"),
+    )
+    for max_key, requested_key in checks:
+        if snapshot[requested_key] > snapshot[max_key]:
+            return f"Budget exceeded: {requested_key}={snapshot[requested_key]} > {max_key}={snapshot[max_key]}"
+    return None
+async def _execute_ssh_commands(ssh: Any, commands: List[str]) -> List[Dict[str, Any]]:
+    outputs: List[Dict[str, Any]] = []
+    for command in commands:
+        raw = await ssh.execute_command(command)
+        if hasattr(raw, "model_dump"):
+            normalized = raw.model_dump(mode="json")
+        elif isinstance(raw, dict):
+            normalized = dict(raw)
+        else:
+            normalized = {"output": str(raw)}
+        normalized.setdefault("command", command)
+        outputs.append(normalized)
+    return outputs
 def _run_native_dialog(kind: str, options: Dict[str, Any]) -> Any:
     try:
         import tkinter as tk
@@ -403,6 +643,59 @@ async def read_settings():
 async def write_settings(req: WriteSettingsFileRequest):
     write_settings_file(req.content)
     return {"success": True}
+@router.post("/ai/chat-proxy")
+async def ai_chat_proxy(req: AIChatProxyRequest):
+    url = _validate_proxy_target_url(req.url)
+    headers = _normalize_proxy_headers(req.headers)
+    body = req.body or {}
+    timeout = _normalize_timeout(req.timeout_seconds)
+    stream_enabled = bool(body.get("stream"))
+    if stream_enabled:
+        client = httpx.AsyncClient(timeout=timeout)
+        try:
+            request_obj = client.build_request("POST", url, headers=headers, json=body)
+            upstream = await client.send(request_obj, stream=True)
+        except httpx.RequestError as e:
+            await client.aclose()
+            raise HTTPException(status_code=502, detail=f"AI 代理请求失败: {e}") from e
+        except Exception as e:
+            await client.aclose()
+            raise HTTPException(status_code=500, detail=f"AI 代理内部错误: {e}") from e
+        if upstream.status_code >= 400:
+            detail = await _read_upstream_error_detail(upstream)
+            await upstream.aclose()
+            await client.aclose()
+            raise HTTPException(
+                status_code=502,
+                detail=f"AI 上游返回 {upstream.status_code}: {detail}",
+            )
+        media_type = upstream.headers.get("content-type") or "text/event-stream"
+        async def _stream_body():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    if chunk:
+                        yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+        return StreamingResponse(_stream_body(), media_type=media_type)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            upstream = await client.post(url, headers=headers, json=body)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"AI 代理请求失败: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 代理内部错误: {e}") from e
+    if upstream.status_code >= 400:
+        detail = _extract_error_detail_from_text(upstream.text, f"HTTP {upstream.status_code}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI 上游返回 {upstream.status_code}: {detail}",
+        )
+    return {
+        "status_code": upstream.status_code,
+        "data": _read_json_or_text(upstream),
+    }
 @router.get("/system/fonts")
 async def get_fonts():
     return {"fonts": get_system_fonts()}
@@ -506,11 +799,144 @@ async def execute_detection_command(req: ExecuteCommandRequest):
     ssh = get_ssh_manager()
     result = await ssh.execute_dashboard_command(req.command)
     return result.model_dump(mode="json")
+@router.post("/execute-selected-remediations")
+async def execute_selected_remediations(req: ExecuteSelectedRemediationsRequest):
+    if req.rollback_mode not in {"none", "preview", "execute"}:
+        raise HTTPException(status_code=400, detail="rollback_mode 必须是 none / preview / execute")
+    if not req.selected_findings:
+        raise HTTPException(status_code=400, detail="selected_findings 不能为空")
+
+    ssh, ssh_error = _safe_get_remediation_ssh()
+    ssh_connected = _is_ssh_connected_for_remediation(ssh)
+    approval_tickets: List[Dict[str, Any]] = []
+    results: List[Dict[str, Any]] = []
+
+    for finding in req.selected_findings:
+        ticket = _build_approval_ticket(req.task, finding)
+        snapshot = _build_budget_snapshot(req.budget, finding, req.rollback_mode)
+        rollback_preview = {
+            "supported": bool(finding.rollback_commands),
+            "commands": list(finding.rollback_commands),
+        }
+        result: Dict[str, Any] = {
+            "finding_id": finding.finding_id,
+            "title": finding.title,
+            "approval_required": False,
+            "approval_ticket": None,
+            "expected_side_effects": list(finding.commands),
+            "rollback_preview": rollback_preview,
+            "rollback_results": [],
+            "budget_snapshot": snapshot,
+            "outputs": [],
+            "error": None,
+        }
+
+        violation = _budget_violation(snapshot)
+        if violation:
+            result["execution_status"] = "blocked"
+            result["error"] = violation
+            results.append(result)
+            continue
+
+        if req.rollback_mode == "preview":
+            result["execution_status"] = "rollback_preview"
+            results.append(result)
+            continue
+
+        if req.dry_run:
+            result["execution_status"] = "dry_run"
+            result["approval_required"] = True
+            result["approval_ticket"] = ticket
+            approval_tickets.append(ticket)
+            results.append(result)
+            continue
+
+        if not ssh_connected and req.rollback_mode == "none":
+            result["execution_status"] = "failed"
+            result["error"] = f"SSH 连接不可用: {ssh_error or '没有活动的 SSH 连接'}"
+            results.append(result)
+            continue
+
+        if finding.commands and not _is_remediation_approved(req, finding):
+            result["execution_status"] = "pending_approval"
+            result["approval_required"] = True
+            result["approval_ticket"] = ticket
+            approval_tickets.append(ticket)
+            results.append(result)
+            continue
+
+        if req.rollback_mode == "execute":
+            if not ssh_connected:
+                result["execution_status"] = "failed"
+                result["error"] = f"SSH 连接不可用: {ssh_error or '没有活动的 SSH 连接'}"
+                results.append(result)
+                continue
+            try:
+                result["rollback_results"] = await _execute_ssh_commands(ssh, finding.rollback_commands)
+                result["execution_status"] = "rollback_completed"
+            except Exception as exc:
+                result["execution_status"] = "failed"
+                result["error"] = str(exc)
+            results.append(result)
+            continue
+
+        if not ssh_connected:
+            result["execution_status"] = "failed"
+            result["error"] = f"SSH 连接不可用: {ssh_error or '没有活动的 SSH 连接'}"
+            results.append(result)
+            continue
+
+        try:
+            run_outputs = await _execute_ssh_commands(ssh, finding.commands)
+            verify_outputs = await _execute_ssh_commands(ssh, finding.verify_commands)
+            result["outputs"] = run_outputs + verify_outputs
+            result["execution_status"] = "completed"
+        except Exception as exc:
+            result["execution_status"] = "failed"
+            result["error"] = str(exc)
+        results.append(result)
+
+    statuses = [item["execution_status"] for item in results]
+    if statuses and all(status == "dry_run" for status in statuses):
+        overall_status = "dry_run"
+    elif statuses and all(status == "rollback_preview" for status in statuses):
+        overall_status = "rollback_preview"
+    elif any(status == "blocked" for status in statuses):
+        overall_status = "blocked"
+    elif any(status == "pending_approval" for status in statuses):
+        overall_status = "pending_approval"
+    elif statuses and all(status == "rollback_completed" for status in statuses):
+        overall_status = "rollback_completed"
+    elif statuses and all(status == "completed" for status in statuses):
+        overall_status = "all_completed"
+    elif any(status == "failed" for status in statuses):
+        overall_status = "failed"
+    else:
+        overall_status = "partially_completed"
+
+    payload: Dict[str, Any] = {
+        "task": req.task,
+        "overall_status": overall_status,
+        "results": results,
+        "approval_tickets": approval_tickets,
+        "budget": req.budget.model_dump(),
+    }
+    if ssh_error and overall_status == "failed":
+        payload["error"] = f"SSH 连接不可用: {ssh_error}"
+    elif any(item.get("error") for item in results) and overall_status == "failed":
+        first_error = next(item["error"] for item in results if item.get("error"))
+        payload["error"] = first_error
+    return payload
 @router.get("/ssh/connection-status")
 async def ssh_get_connection_status():
     ssh = get_ssh_manager()
     status = await ssh.get_connection_status()
     return status.model_dump(mode="json") if status else None
+
+@router.get("/ssh/connection-health")
+async def ssh_get_connection_health():
+    ssh = get_ssh_manager()
+    return ssh.get_connection_health()
 @router.post("/ssh/test-performance")
 async def test_ssh_performance():
     ssh = get_ssh_manager()
@@ -595,24 +1021,9 @@ async def detect_system_type():
             version = line[11:].strip('"').strip("'")
         elif line.startswith("PRETTY_NAME="):
             pretty_name = line[12:].strip('"').strip("'")
+    # 直接使用 /etc/os-release 中的 ID，适配所有 Linux 发行版
     system_type = id_val
-    if id_val in (
-        "kylin",
-        "uos",
-        "uniontech",
-        "deepin",
-        "openeuler",
-        "anolis",
-        "ubuntu",
-        "debian",
-        "centos",
-        "rhel",
-        "fedora",
-        "arch",
-        "alpine",
-    ):
-        system_type = id_val
-    elif id_val in ("opensuse", "suse"):
+    if id_val in ("opensuse", "opensuse-leap", "opensuse-tumbleweed"):
         system_type = "opensuse"
     elif id_like:
         if "ubuntu" in id_like:
@@ -631,10 +1042,6 @@ async def detect_system_type():
             system_type = "arch"
         elif "suse" in id_like:
             system_type = "opensuse"
-        else:
-            system_type = "generic"
-    else:
-        system_type = "generic"
     return {
         "type": system_type,
         "name": name,
@@ -678,38 +1085,109 @@ async def sftp_upload(req: SftpUploadRequest):
 async def sftp_upload_direct(
     file: UploadFile = File(...),
     remote_path: str = Form(...),
+    upload_id: str = Form(...),
+    file_size: int = Form(...),
 ):
-    import shutil
     tmp_path = None
     try:
         filename = file.filename or "upload"
         suffix = os.path.splitext(filename)[1]
+        total_bytes = max(int(file_size or 0), 0)
+        _set_sftp_upload_progress(
+            upload_id,
+            stage="receiving",
+            transferred_bytes=0,
+            total_bytes=total_bytes,
+        )
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            shutil.copyfileobj(file.file, tmp)
+            received_bytes = 0
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                received_bytes += len(chunk)
+                _set_sftp_upload_progress(
+                    upload_id,
+                    stage="receiving",
+                    transferred_bytes=received_bytes,
+                    total_bytes=total_bytes,
+                )
             tmp_path = tmp.name
         logger.info(f"上传文件: 本地={tmp_path}, 远程={remote_path}, 原始文件名={filename}")
+        _set_sftp_upload_progress(
+            upload_id,
+            stage="transferring",
+            transferred_bytes=0,
+            total_bytes=total_bytes,
+        )
         async def _go():
             ssh = get_ssh_manager()
-            await ssh.upload_file(tmp_path, remote_path)
+            await ssh.upload_file(
+                tmp_path,
+                remote_path,
+                progress_callback=lambda transferred, total: _set_sftp_upload_progress(
+                    upload_id,
+                    stage="transferring",
+                    transferred_bytes=transferred,
+                    total_bytes=total_bytes or total,
+                ),
+            )
         try:
             await _wrap_ssh_transport(_go)
         except HTTPException as e:
             detail = e.detail if isinstance(e.detail, str) else str(e.detail)
+            _set_sftp_upload_progress(
+                upload_id,
+                stage="error",
+                transferred_bytes=0,
+                total_bytes=total_bytes,
+                done=True,
+                error=detail,
+            )
             if "Permission denied" in detail:
                 raise HTTPException(status_code=403, detail=f"远程服务器拒绝写入: {remote_path}，请检查目录权限") from e
             raise
+        _set_sftp_upload_progress(
+            upload_id,
+            stage="completed",
+            transferred_bytes=total_bytes,
+            total_bytes=total_bytes,
+            done=True,
+            success=True,
+        )
+        return {"success": True, "upload_id": upload_id}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"上传文件失败: {e}", exc_info=True)
+        _set_sftp_upload_progress(
+            upload_id,
+            stage="error",
+            transferred_bytes=0,
+            total_bytes=max(int(file_size or 0), 0),
+            done=True,
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"上传文件失败: {str(e)}") from e
     finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
         if tmp_path:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
-    return {"success": True}
+
+
+@router.get("/sftp/upload-progress")
+async def sftp_upload_progress(upload_id: str):
+    progress = _sftp_upload_progress.get(upload_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="未找到上传进度")
+    return progress
 @router.post("/sftp/download")
 async def sftp_download(req: SftpDownloadRequest):
     async def _go():
@@ -1009,14 +1487,14 @@ async def ssh_get_completion(input: str):
 async def read_system_log(req: ReadSystemLogRequest):
     ssh = get_ssh_manager()
     result = await log_analysis.read_system_log(
-        ssh, req.log_path, req.page, req.page_size, req.filter, req.date_filter
+        ssh, req.log_path, req.page, req.page_size, req.filter, req.date_filter, req.level_filter
     )
     return result.model_dump()
 @router.post("/log/read-journalctl")
 async def read_journalctl_log(req: ReadJournalctlLogRequest):
     ssh = get_ssh_manager()
     result = await log_analysis.read_journalctl_log(
-        ssh, req.page, req.page_size, req.unit, req.filter, req.since, req.until
+        ssh, req.page, req.page_size, req.unit, req.filter, req.since, req.until, req.level_filter
     )
     return result.model_dump()
 @router.get("/log/list-files")
@@ -1120,11 +1598,18 @@ class PentestStartRequest(BaseModel):
     target: str = Field(..., description="目标 IP / 域名 / 网段")
     max_rounds: int = Field(30, ge=1, le=100, description="最大执行轮数")
     dry_run: bool = Field(False, description="不真正执行命令")
+    execution_mode: Literal["parallel", "serial"] = Field("parallel", description="任务执行模式")
+    skill_query: str = Field("", description="技能匹配关键词，可选；为空时由系统自动构造")
+    skill_limit: int = Field(5, ge=1, le=10, description="每轮最多注入技能数量")
     api_key: str = Field("", description="LLM API Key")
     model: str = Field("gpt-4o-mini", description="LLM 模型")
     base_url: str = Field("https://api.openai.com/v1", description="LLM API 地址")
     provider: str = Field("openai", description="LLM 提供商: openai/deepseek/qwen/ollama")
     temperature: float = Field(0.3, ge=0, le=2, description="LLM 温度")
+    llm_max_tokens: int = Field(600, ge=128, le=4096, description="LLM 最大输出 token")
+    llm_timeout_seconds: int = Field(60, ge=10, le=600, description="LLM 单次请求超时时间")
+    llm_max_retries: int = Field(1, ge=0, le=10, description="LLM 请求最大重试次数")
+    llm_retry_backoff_seconds: float = Field(1.2, ge=0.1, le=30.0, description="LLM 重试退避秒数")
 
 @router.post("/agent/pentest/start")
 async def pentest_start(req: PentestStartRequest):
@@ -1142,6 +1627,10 @@ async def pentest_start(req: PentestStartRequest):
         base_url=req.base_url,
         provider=req.provider,
         temperature=req.temperature,
+        max_tokens=req.llm_max_tokens,
+        timeout=req.llm_timeout_seconds,
+        max_retries=req.llm_max_retries,
+        retry_backoff=req.llm_retry_backoff_seconds,
     )
     set_llm_client(client)
 
@@ -1154,26 +1643,48 @@ async def pentest_start(req: PentestStartRequest):
     }
 
     async def _run_agent():
-        llm = get_llm_client()
-        loop = asyncio.new_event_loop()
+        try:
+            llm = get_llm_client()
+            loop = asyncio.new_event_loop()
 
-        def llm_fn(system: str, user: str) -> str:
-            return loop.run_until_complete(llm.chat(system, user))
+            def llm_fn(system: str, user: str, on_chunk=None) -> str:
+                if on_chunk is not None:
+                    return loop.run_until_complete(llm.chat_stream(system, user, on_chunk=on_chunk))
+                return loop.run_until_complete(llm.chat(system, user))
 
-        from app.services.pentest_agent.agent import run as agent_run
+            from app.services.pentest_agent.agent import run as agent_run
 
-        def _blocking():
-            try:
-                agent_run(req.target, llm_fn, state_path, req.max_rounds, req.dry_run)
-            finally:
-                loop.close()
+            def _blocking():
+                try:
+                    agent_run(
+                        req.target,
+                        llm_fn,
+                        state_path,
+                        req.max_rounds,
+                        req.dry_run,
+                        parallel_execution=(req.execution_mode == "parallel"),
+                        skill_query=req.skill_query or None,
+                        skill_limit=req.skill_limit,
+                    )
+                finally:
+                    loop.close()
 
-        await asyncio.to_thread(_blocking)
-        _pentest_tasks[task_id]["status"] = "done"
+            await asyncio.to_thread(_blocking)
+            _pentest_tasks[task_id]["status"] = "done"
+        except Exception as e:
+            logger.error(f"Pentest task {task_id} failed: {str(e)}", exc_info=True)
+            _pentest_tasks[task_id]["status"] = "failed"
+            _pentest_tasks[task_id]["error"] = str(e)
 
     task = asyncio.create_task(_run_agent())
     _pentest_tasks[task_id]["task_obj"] = task
     return {"success": True, "message": "渗透任务已启动", "target": req.target, "task_id": task_id}
+
+
+@router.get("/agent/pentest/doctor")
+async def pentest_doctor(refresh: bool = False):
+    executor = Executor()
+    return executor.doctor(refresh=refresh)
 
 @router.get("/agent/pentest/status")
 async def pentest_status(task_id: str):
@@ -1198,6 +1709,7 @@ async def pentest_status(task_id: str):
         "actions_count": len(actions),
         "actions": slim_actions,
         "task_id": task_id,
+        "error": tinfo.get("error"),
     }
 
 @router.get("/agent/pentest/logs")
@@ -1303,27 +1815,12 @@ def _ensure_kb_dir():
 
 @router.get("/skills")
 async def list_skills():
-    """列出所有 skills（不区分分类）"""
-    result = []
-    for root, _dirs, files in os.walk(_SKILLS_ROOT):
-        for fname in sorted(files):
-            if fname.endswith(".json"):
-                fpath = os.path.join(root, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    result.append({
-                        "filename": fname,
-                        "name": data.get("name", fname),
-                        "description": data.get("description", ""),
-                    })
-                except Exception:
-                    result.append({
-                        "filename": fname,
-                        "name": fname,
-                        "description": "",
-                    })
-    return {"items": result}
+    """列出所有 skills（支持 json+md 共存，返回 mode 标识）"""
+    from app.services.skill_engine import SkillLoader
+    loader = SkillLoader(_SKILLS_ROOT)
+    skills = loader.load_all()
+    items = [s.to_api_dict() for s in skills]
+    return {"items": items}
 
 @router.delete("/skills/{filename}")
 async def delete_skill(filename: str):

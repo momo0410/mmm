@@ -255,6 +255,14 @@ export class TerminalManager extends EventEmitter<TerminalOutput[]> {
 
     } catch (error) {
       console.error('执行命令失败:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (/没有活动的 SSH 连接|not connected|connection lost|broken pipe|EOF|reset/i.test(errMsg)) {
+        try {
+          await sshConnectionManager.checkConnectionStatus(false);
+        } catch {
+          // 忽略状态同步异常
+        }
+      }
       (window as any).showConnectionStatus(`命令执行失败: ${error}`, 'error');
 
       this.commandHistory.push({
@@ -314,6 +322,14 @@ export class TerminalManager extends EventEmitter<TerminalOutput[]> {
 
     } catch (error) {
       console.error(`使用账号 ${username} 执行命令失败:`, error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (/没有活动的 SSH 连接|not connected|connection lost|broken pipe|EOF|reset/i.test(errMsg)) {
+        try {
+          await sshConnectionManager.checkConnectionStatus(false);
+        } catch {
+          // 忽略状态同步异常
+        }
+      }
       (window as any).showConnectionStatus(`使用账号 ${username} 执行命令失败: ${error}`, 'error');
 
       this.commandHistory.push({

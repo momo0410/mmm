@@ -52,6 +52,26 @@ export const PAGE_DESCRIPTIONS: Record<AppPage, string> = {
   'database': '数据库管理',
   'payloader': '安全测试Payload生成'
 };
+
+export const ALL_PAGE_IDS: AppPage[] = [
+  'dashboard',
+  'system-info',
+  'ssh-terminal',
+  'remote-operations',
+  'emergency-commands',
+  'quick-detection',
+  'database',
+  'log-analysis',
+  'payloader'
+];
+
+export interface PageState {
+  activeTab?: string;
+  searchQuery?: string;
+  filterValue?: string;
+  scrollTop?: number;
+  sortMode?: string;
+}
 /**
  * 统一应用状态类型定义（全局唯一来源）
  */

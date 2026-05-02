@@ -373,6 +373,8 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { invoke } from '../shims/@tauri-apps/api/core'
 import { commandHintsManager, type CommandHint } from '../modules/ssh/commandHints'
+import { streamAIProxyMessages, type AIProviderConfig } from '../modules/utils/aiProxy'
+import { aiService } from '../modules/ai/aiService'
 
 interface TerminalInstance {
   id: string
@@ -391,14 +393,34 @@ interface TerminalInstance {
   errorCount?: number
   // ResizeObserver引用，用于清理
   resizeObserver?: ResizeObserver
-  // 终端输出轮询定时器
-  outputPollTimer?: ReturnType<typeof setInterval>
+  // 终端实时 WebSocket
+  terminalSocket?: WebSocket
+  // WebSocket 自动重连计时器
+  outputReconnectTimer?: ReturnType<typeof setTimeout>
+  // 当前终端通道的重连次数
+  wsReconnectAttempts?: number
+  // WebSocket 心跳 ping 定时器
+  wsPingTimer?: ReturnType<typeof setInterval>
+  // WebSocket 无消息超时看门狗
+  wsWatchdogTimer?: ReturnType<typeof setInterval>
+  // 最近一次收到 WebSocket 消息的时间戳
+  wsLastMessageTime?: number
 }
 
 // 响应式数据
 const terminals = ref<TerminalInstance[]>([])
 const activeTerminalId = ref<string>('')
 const connectionStatus = ref<'connected' | 'disconnected' | 'connecting'>('disconnected')
+const textEncoder = new TextEncoder()
+const TERMINAL_WS_BASE = (() => {
+  const fromEnv = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (fromEnv && /^https?:\/\//i.test(fromEnv)) {
+    return fromEnv
+      .replace(/^http/i, 'ws')
+      .replace(/\/api\/v1\/?$/i, '')
+  }
+  return 'ws://127.0.0.1:3001'
+})()
 
 // AI助手相关数据
 const showAIInput = ref<boolean>(false)
@@ -439,8 +461,16 @@ const commandSuggestions = ref<CommandHint[]>([])
 const selectedSuggestionIndex = ref<number>(-1)
 const suggestionsPanelPosition = ref<{ x: number; y: number }>({ x: 0, y: 0 })
 
+const activeTerminal = computed(() =>
+  terminals.value.find(t => t.id === activeTerminalId.value)
+)
+
 // 计算属性
 const connectionStatusText = computed(() => {
+  if (connectionStatus.value === 'connected' && activeTerminal.value?.outputReconnectTimer) {
+    return 'SSH已连接/通道重连中'
+  }
+
   switch (connectionStatus.value) {
     case 'connected': return '已连接'
     case 'connecting': return '连接中...'
@@ -452,6 +482,14 @@ const connectionStatusText = computed(() => {
 // 生成唯一ID
 const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2)
+}
+
+const getTerminalWsUrl = (terminalId: string): string => {
+  return `${TERMINAL_WS_BASE}/ws/terminal/${encodeURIComponent(terminalId)}`
+}
+
+const isTerminalSocketOpen = (terminalInstance: TerminalInstance): boolean => {
+  return terminalInstance.terminalSocket?.readyState === WebSocket.OPEN
 }
 
 // 创建新终端
@@ -596,6 +634,248 @@ const classifyInput = (data: string): 'control' | 'navigation' | 'normal' | 'bul
   return 'normal'
 }
 
+const stopReceivingOutput = (
+  terminalInstance: TerminalInstance,
+  options: { closeSocket?: boolean } = {}
+) => {
+  const { closeSocket = true } = options
+
+  if (terminalInstance.outputReconnectTimer) {
+    clearTimeout(terminalInstance.outputReconnectTimer)
+    terminalInstance.outputReconnectTimer = undefined
+  }
+
+  if (terminalInstance.wsPingTimer) {
+    clearInterval(terminalInstance.wsPingTimer)
+    terminalInstance.wsPingTimer = undefined
+  }
+
+  if (terminalInstance.wsWatchdogTimer) {
+    clearInterval(terminalInstance.wsWatchdogTimer)
+    terminalInstance.wsWatchdogTimer = undefined
+  }
+
+  if (closeSocket && terminalInstance.terminalSocket) {
+    try {
+      const socket = terminalInstance.terminalSocket as WebSocket & { __expectedClose?: boolean }
+      terminalInstance.terminalSocket = undefined
+      socket.__expectedClose = true
+      socket.onopen = null
+      socket.onmessage = null
+      socket.onerror = null
+      socket.onclose = null
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close()
+      }
+    } catch (error) {
+      console.warn('关闭终端 WebSocket 失败:', error)
+    }
+  }
+}
+
+const writeTerminalPayload = (terminalInstance: TerminalInstance, payload: unknown) => {
+  if (payload == null) return
+
+  if (typeof payload === 'string') {
+    if (payload) terminalInstance.terminal.write(payload)
+    return
+  }
+
+  if (payload instanceof ArrayBuffer) {
+    terminalInstance.terminal.write(new TextDecoder().decode(payload))
+    return
+  }
+
+  if (payload instanceof Blob) {
+    payload.text().then(text => {
+      if (text) terminalInstance.terminal.write(text)
+    }).catch(() => {})
+    return
+  }
+
+  if (payload instanceof Uint8Array) {
+    terminalInstance.terminal.write(new TextDecoder().decode(payload))
+  }
+}
+
+const tryRestoreBackendSshConnection = async (
+  terminalInstance: TerminalInstance
+): Promise<boolean> => {
+  const sshConnectionManager = (window as any).sshConnectionManager
+  const configManager = (window as any).app?.sshManager
+
+  if (!sshConnectionManager || typeof sshConnectionManager.connect !== 'function') {
+    return false
+  }
+
+  const statusInfo = sshConnectionManager.getConnectionStatus?.() || null
+  const fallbackInfo = terminalInstance.connectionInfo || statusInfo
+  if (!fallbackInfo?.host || !fallbackInfo?.port || !fallbackInfo?.username) {
+    return false
+  }
+
+  try {
+    // 优先读取持久化配置中的密文密码，确保重连可自动进行
+    let encryptedPassword: string | undefined
+    if (configManager && typeof configManager.getConnections === 'function') {
+      const savedConnection = configManager.getConnections?.().find(
+        (conn: any) =>
+          conn.host === fallbackInfo.host &&
+          Number(conn.port) === Number(fallbackInfo.port) &&
+          conn.username === fallbackInfo.username
+      )
+      encryptedPassword = savedConnection?.encryptedPassword
+    }
+
+    if (!encryptedPassword) {
+      return false
+    }
+
+    const password = await invoke('decrypt_password', { encryptedPassword }) as string
+    if (!password) return false
+
+    await sshConnectionManager.connect(
+      fallbackInfo.host,
+      Number(fallbackInfo.port),
+      fallbackInfo.username,
+      password
+    )
+
+    return true
+  } catch (error) {
+    console.warn('SSH终端自动恢复主连接失败:', error)
+    return false
+  }
+}
+
+const recoverFromSocketFatalClose = async (
+  terminalInstance: TerminalInstance,
+  event: CloseEvent
+) => {
+  // 防止并发恢复导致重连风暴
+  if ((terminalInstance as any)._fatalRecoveryInProgress) {
+    return
+  }
+  ;(terminalInstance as any)._fatalRecoveryInProgress = true
+
+  const reason = event.reason || `code=${event.code || 'unknown'}`
+  const reasonText = event.reason || ''
+  const needsSessionRecreate = ['没有活动的 SSH 连接', 'SSH会话已丢失', 'SSH通道异常', 'SSH写入失败']
+    .some(keyword => reasonText.includes(keyword))
+
+  try {
+    // 先确认后端SSH主连接是否仍然在线
+    const liveStatus = await invoke('ssh_get_connection_status').catch(() => null) as any
+    if (liveStatus?.connected) {
+      terminalInstance.connectionInfo = {
+        host: liveStatus.host,
+        port: liveStatus.port,
+        username: liveStatus.username
+      }
+      connectionStatus.value = 'connected'
+
+      // 会话级异常时优先重建终端会话，避免仅重连WS导致循环断开
+      if (needsSessionRecreate) {
+        terminalInstance.terminal.writeln('\r\n\x1b[33m检测到SSH主连接仍在线，正在自动重建终端会话...\x1b[0m')
+        terminalInstance.isConnected = false
+        await connectToSSH(terminalInstance)
+        return
+      }
+
+      terminalInstance.terminal.writeln('\r\n\x1b[33m检测到SSH主连接仍在线，正在自动恢复终端通道...\x1b[0m')
+      scheduleOutputReconnect(terminalInstance, reason)
+      return
+    }
+
+    terminalInstance.terminal.writeln('\r\n\x1b[33m检测到SSH主连接异常，正在尝试自动恢复主连接...\x1b[0m')
+    const restored = await tryRestoreBackendSshConnection(terminalInstance)
+    if (restored) {
+      terminalInstance.isConnected = false
+      connectionStatus.value = 'connecting'
+      terminalInstance.terminal.writeln('\x1b[32mSSH主连接已恢复，正在重建终端会话...\x1b[0m')
+      await connectToSSH(terminalInstance)
+      return
+    }
+
+    terminalInstance.isConnected = false
+    connectionStatus.value = 'disconnected'
+    terminalInstance.terminal.writeln('\r\n\x1b[31mSSH 连接已断开，请按 Ctrl+Shift+R 手动重连\x1b[0m')
+    console.warn(`SSH终端 WebSocket 关闭(SSH断开): ${terminalInstance.id}, 自动恢复失败`)
+  } finally {
+    ;(terminalInstance as any)._fatalRecoveryInProgress = false
+  }
+}
+
+const sendTerminalInputData = async (terminalInstance: TerminalInstance, data: string) => {
+  if (isTerminalSocketOpen(terminalInstance)) {
+    terminalInstance.terminalSocket!.send(textEncoder.encode(data))
+    return
+  }
+
+  await invoke('ssh_send_input', { terminalId: terminalInstance.id, data })
+}
+
+const scheduleOutputReconnect = (terminalInstance: TerminalInstance, reason: string) => {
+  if (!terminalInstance.isConnected) return
+  if (terminalInstance.outputReconnectTimer) return
+  // 防止重连回调中的竞态：上一个重连尚未完成时不发起新的
+  if ((terminalInstance as any)._reconnectInProgress) return
+
+  const now = Date.now()
+  const attempt = (terminalInstance.wsReconnectAttempts ?? 0) + 1
+  terminalInstance.wsReconnectAttempts = attempt
+
+  // 30 秒内最多允许 5 次重连，超过则冷却 15 秒
+  const recent = (terminalInstance as any)._reconnectTimestamps || []
+  recent.push(now)
+  while (recent.length > 0 && recent[0] < now - 30000) recent.shift()
+  ;(terminalInstance as any)._reconnectTimestamps = recent
+  if (recent.length > 5) {
+    console.warn(`SSH终端重连过于频繁 (${recent.length}次/30s)，冷却15秒`)
+    terminalInstance.terminal.writeln('\r\n\x1b[33m终端实时通道重连过于频繁，冷却 15 秒...\x1b[0m')
+    terminalInstance.outputReconnectTimer = window.setTimeout(() => {
+      terminalInstance.outputReconnectTimer = undefined
+      ;(terminalInstance as any)._reconnectTimestamps = []
+      terminalInstance.wsReconnectAttempts = 0
+      if (terminalInstance.isConnected) {
+        scheduleOutputReconnect(terminalInstance, 'cooldown结束')
+      }
+    }, 15000)
+    return
+  }
+
+  if (attempt > 20) {
+    terminalInstance.isConnected = false
+    terminalInstance.outputReconnectTimer = undefined
+    terminalInstance.terminal.writeln('\r\n\x1b[31m终端实时通道重连失败，请按 Ctrl+Shift+R 手动重连\x1b[0m')
+    console.error(`SSH终端 WebSocket 重连失败: ${terminalInstance.id}, reason=${reason}`)
+    return
+  }
+
+  const delay = Math.min(500 * (2 ** Math.min(attempt - 1, 5)), 15000)
+
+  if (attempt === 1) {
+    terminalInstance.terminal.writeln('\r\n\x1b[33m终端实时通道已断开，SSH 主连接仍在，正在自动重连...\x1b[0m')
+  } else if (attempt <= 3) {
+    terminalInstance.terminal.writeln(`\x1b[33m重连中(${attempt}/20)...\x1b[0m`)
+  }
+
+  console.warn(`SSH终端 WebSocket 已断开，准备重连: ${terminalInstance.id}, attempt=${attempt}, delay=${delay}ms, reason=${reason}`)
+
+  terminalInstance.outputReconnectTimer = window.setTimeout(async () => {
+    terminalInstance.outputReconnectTimer = undefined
+    if (!terminalInstance.isConnected) return
+
+    ;(terminalInstance as any)._reconnectInProgress = true
+    try {
+      // 不重建终端会话（保留运行中的 shell），仅重新建立 WebSocket
+      startReceivingOutput(terminalInstance)
+    } finally {
+      ;(terminalInstance as any)._reconnectInProgress = false
+    }
+  }, delay)
+}
+
 // Adaptive input queuing with priority and rate limiting
 const queueInput = (terminalId: string, chunk: string) => {
   let entry = inputBuffers.get(terminalId) as InputBuffer
@@ -668,7 +948,7 @@ const flushInput = async (terminalId: string, retryCount = 0) => {
   if (!terminalInstance) return
 
   try {
-    await invoke('ssh_send_input', { terminalId, data: dataToSend })
+    await sendTerminalInputData(terminalInstance, dataToSend)
 
     // Reset any error state on successful send
     if (terminalInstance.errorCount) {
@@ -788,7 +1068,7 @@ const handleTerminalInput = async (terminalId: string, data: string) => {
       }
       
       console.log('发送控制字符:', { terminalId, data: JSON.stringify(data), charCode: data.charCodeAt(0) })
-      await invoke('ssh_send_input', { terminalId, data })
+      await sendTerminalInputData(terminalInstance, data)
       // Reset error count on successful control input
       if (terminalInstance.errorCount) {
         terminalInstance.errorCount = 0
@@ -861,22 +1141,44 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
       }
     }
 
+    // 二次确认后端真实状态，避免仅依赖前端状态导致“显示在线但后端已断开”
+    try {
+      const backendStatus = await invoke('ssh_get_connection_status') as any
+      if (backendStatus?.connected) {
+        isBackendConnected = true
+        connectionInfo = backendStatus
+      } else if (isBackendConnected) {
+        console.warn('⚠️ [SSH终端] 前端状态在线但后端返回未连接，按后端状态处理')
+        isBackendConnected = false
+      }
+    } catch (e) {
+      console.warn('⚠️ [SSH终端] 后端状态二次确认失败，保留当前判断:', e)
+    }
+
     if (!isBackendConnected) {
-      console.warn('⚠️ [SSH终端] 没有活动的SSH连接')
-      terminalInstance.terminal.writeln('\x1b[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m')
-      terminalInstance.terminal.writeln('\x1b[31m  错误: 没有活动的 SSH 连接\x1b[0m')
-      terminalInstance.terminal.writeln('\x1b[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m')
-      terminalInstance.terminal.writeln('')
-      terminalInstance.terminal.writeln('\x1b[33m可能的原因:\x1b[0m')
-      terminalInstance.terminal.writeln('  1. 主窗口尚未连接到SSH服务器')
-      terminalInstance.terminal.writeln('  2. SSH连接已断开')
-      terminalInstance.terminal.writeln('')
-      terminalInstance.terminal.writeln('\x1b[36m解决方法:\x1b[0m')
-      terminalInstance.terminal.writeln('  • 在主窗口左侧边栏连接到SSH服务器')
-      terminalInstance.terminal.writeln('  • 连接成功后，关闭此窗口重新打开')
-      terminalInstance.terminal.writeln('')
-      connectionStatus.value = 'disconnected'
-      return
+      console.warn('⚠️ [SSH终端] 没有活动的SSH连接，尝试自动恢复')
+      terminalInstance.terminal.writeln('\x1b[33m未检测到活动SSH主连接，正在尝试自动恢复...\x1b[0m')
+      const restored = await tryRestoreBackendSshConnection(terminalInstance)
+      if (restored) {
+        isBackendConnected = true
+        connectionInfo = sshConnectionManager?.getConnectionStatus?.() || connectionInfo
+        terminalInstance.terminal.writeln('\x1b[32mSSH主连接恢复成功，继续建立终端会话...\x1b[0m')
+      } else {
+        terminalInstance.terminal.writeln('\x1b[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m')
+        terminalInstance.terminal.writeln('\x1b[31m  错误: 没有活动的 SSH 连接\x1b[0m')
+        terminalInstance.terminal.writeln('\x1b[31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m')
+        terminalInstance.terminal.writeln('')
+        terminalInstance.terminal.writeln('\x1b[33m可能的原因:\x1b[0m')
+        terminalInstance.terminal.writeln('  1. 主窗口尚未连接到SSH服务器')
+        terminalInstance.terminal.writeln('  2. SSH连接已断开')
+        terminalInstance.terminal.writeln('')
+        terminalInstance.terminal.writeln('\x1b[36m解决方法:\x1b[0m')
+        terminalInstance.terminal.writeln('  • 在主窗口左侧边栏连接到SSH服务器')
+        terminalInstance.terminal.writeln('  • 连接成功后，关闭此窗口重新打开')
+        terminalInstance.terminal.writeln('')
+        connectionStatus.value = 'disconnected'
+        return
+      }
     }
 
     if (!connectionInfo && sshConnectionManager && typeof sshConnectionManager.getConnectionStatus === 'function') {
@@ -890,6 +1192,9 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
       }
       updateTerminalTitle(terminalInstance)
     }
+
+    stopReceivingOutput(terminalInstance)
+    terminalInstance.wsReconnectAttempts = 0
 
     // 创建终端会话
     console.log('🔌 [SSH终端] 创建终端会话:', terminalInstance.id)
@@ -917,32 +1222,13 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
     const errorMsg = String(error)
     console.error('SSH 连接失败:', errorMsg)
 
-    // 检查是否是通道创建失败，可能需要重新连接SSH
+    // 检查是否是通道创建失败，尝试使用保存的密码重新连接SSH
     if (/创建通道失败|channel.*open|Session.*-7|Unable to send/i.test(errorMsg)) {
       terminalInstance.terminal.writeln('\x1b[31m✗ SSH会话异常，尝试重新连接...\x1b[0m')
 
       try {
-        // 尝试重新建立SSH连接
-        const sshConnectionManager = (window as any).sshConnectionManager
-        if (sshConnectionManager) {
-          // 先断开再重连（因为没有直接的reconnect方法）
-          try {
-            await sshConnectionManager.disconnect()
-          } catch (e) {
-            // 忽略断开失败的错误
-          }
-
-          // 获取当前连接信息并重新连接
-          const connectionInfo = sshConnectionManager.getConnectionStatus()
-          if (connectionInfo) {
-            await sshConnectionManager.connect(
-              connectionInfo.host,
-              connectionInfo.port,
-              connectionInfo.username,
-              '' // 密码需要重新输入，这里先用空字符串
-            )
-          }
-
+        const restored = await tryRestoreBackendSshConnection(terminalInstance)
+        if (restored) {
           terminalInstance.terminal.writeln('\x1b[33m正在重试创建终端会话...\x1b[0m')
 
           // 重试创建终端会话
@@ -970,38 +1256,117 @@ const connectToSSH = async (terminalInstance: TerminalInstance) => {
   }
 }
 
-// 开始接收输出（基于 HTTP 轮询）
+// 开始接收输出：仅使用 WebSocket 实时双向传输
 const startReceivingOutput = (terminalInstance: TerminalInstance) => {
-  // 清理旧的轮询
-  if (terminalInstance.outputPollTimer) {
-    clearInterval(terminalInstance.outputPollTimer)
-    terminalInstance.outputPollTimer = undefined
+  stopReceivingOutput(terminalInstance)
+
+  const socket = new WebSocket(getTerminalWsUrl(terminalInstance.id)) as WebSocket & {
+    __expectedClose?: boolean
+  }
+  socket.binaryType = 'arraybuffer'
+  terminalInstance.terminalSocket = socket
+
+  const connectDeadline = window.setTimeout(() => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      try { socket.close() } catch {}
+    }
+  }, 5000)
+
+  socket.onopen = () => {
+    clearTimeout(connectDeadline)
+    terminalInstance.terminalSocket = socket
+    const recovered = (terminalInstance.wsReconnectAttempts ?? 0) > 0
+    terminalInstance.wsReconnectAttempts = 0
+    ;(terminalInstance as any)._reconnectTimestamps = []
+    if (terminalInstance.outputReconnectTimer) {
+      clearTimeout(terminalInstance.outputReconnectTimer)
+      terminalInstance.outputReconnectTimer = undefined
+    }
+    if (recovered) {
+      terminalInstance.terminal.writeln('\x1b[32m终端实时通道已恢复\x1b[0m')
+    }
+    console.log(`✅ SSH终端 WebSocket 已连接: ${terminalInstance.id}`)
+
+    // 记录最后一次收到消息的时间
+    terminalInstance.wsLastMessageTime = Date.now()
+
+    if (terminalInstance.wsPingTimer) clearInterval(terminalInstance.wsPingTimer)
+    terminalInstance.wsPingTimer = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        try { socket.send(JSON.stringify({ type: 'ping' })) } catch {}
+      }
+    }, 10000)
+
+    // 看门狗：超过 45s 无任何消息则认为连接已死，主动断开触发重连
+    if (terminalInstance.wsWatchdogTimer) clearInterval(terminalInstance.wsWatchdogTimer)
+    terminalInstance.wsWatchdogTimer = window.setInterval(() => {
+      if (socket.readyState !== WebSocket.OPEN) return
+      const idle = Date.now() - (terminalInstance.wsLastMessageTime || 0)
+      if (idle > 45000) {
+        console.warn(`SSH终端 WebSocket 无响应超时: ${terminalInstance.id}, idle=${idle}ms, 主动断开重连`)
+        socket.__expectedClose = false
+        try { socket.close() } catch {}
+      }
+    }, 5000)
   }
 
-  const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1'
+  socket.onmessage = (event) => {
+    terminalInstance.wsLastMessageTime = Date.now()
+    // 服务器发来的 ping/pong 文本消息不应输出到终端
+    if (typeof event.data === 'string') {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'ping' || msg.type === 'pong') {
+          if (msg.type === 'ping') {
+            // 响应服务器 ping
+            try { socket.send(JSON.stringify({ type: 'pong' })) } catch {}
+          }
+          return
+        }
+      } catch {}
+    }
+    writeTerminalPayload(terminalInstance, event.data)
+  }
 
-  // 开始轮询终端输出（每 50ms 一次）
-  terminalInstance.outputPollTimer = setInterval(async () => {
-    if (!terminalInstance.isConnected) {
-      clearInterval(terminalInstance.outputPollTimer!)
-      terminalInstance.outputPollTimer = undefined
+  socket.onerror = (event) => {
+    console.warn(`SSH终端 WebSocket 错误: ${terminalInstance.id}`, event)
+  }
+
+  socket.onclose = (event) => {
+    clearTimeout(connectDeadline)
+    if (terminalInstance.wsPingTimer) {
+      clearInterval(terminalInstance.wsPingTimer)
+      terminalInstance.wsPingTimer = undefined
+    }
+    if (terminalInstance.wsWatchdogTimer) {
+      clearInterval(terminalInstance.wsWatchdogTimer)
+      terminalInstance.wsWatchdogTimer = undefined
+    }
+    if (terminalInstance.terminalSocket === socket) {
+      terminalInstance.terminalSocket = undefined
+    }
+    if (socket.__expectedClose) {
       return
     }
 
-    try {
-      const resp = await fetch(`${API_BASE}/ssh/terminal/read-output?terminal_id=${encodeURIComponent(terminalInstance.id)}`, {
-        method: 'POST',
-      })
-      if (!resp.ok) return
-      const json = await resp.json()
-      const data = json?.data
-      if (data) {
-        terminalInstance.terminal.write(data)
-      }
-    } catch (err) {
-      // 静默忽略轮询错误
+    console.warn(`SSH终端 WebSocket 已关闭: ${terminalInstance.id}, code=${event.code}, reason=${event.reason || 'n/a'}`)
+
+    // 服务器指示可能存在 SSH/会话级异常：优先尝试自动恢复
+    const fatalClose = event.code === 1011 || event.code === 1001
+    const fatalReasons = ['没有活动的 SSH 连接', 'SSH会话已丢失', 'SSH通道异常', 'SSH写入失败']
+    if (fatalClose && fatalReasons.some(r => event.reason?.includes(r))) {
+      void recoverFromSocketFatalClose(terminalInstance, event)
+      return
     }
-  }, 50)
+
+    // WebSocket 层面的断开（非 SSH 断开），重连 WebSocket 即可
+    if (terminalInstance.isConnected) {
+      scheduleOutputReconnect(
+        terminalInstance,
+        event.reason || `code=${event.code || 'unknown'}`
+      )
+    }
+  }
 }
 
 // 切换终端
@@ -1053,6 +1418,8 @@ const closeTerminal = async (terminalId: string) => {
         terminalInstance.resizeObserver = undefined
       } catch {}
     }
+
+    stopReceivingOutput(terminalInstance)
 
     // 关闭SSH会话
     if (terminalInstance.isConnected) {
@@ -1493,6 +1860,13 @@ const toggleAIInput = () => {
 
 const loadAIProviderInfo = async () => {
   try {
+    // 优先使用统一 AI 服务配置（与日志审计页一致）
+    const serviceConfig = aiService.getConfig()
+    if (serviceConfig) {
+      currentAIProvider.value = serviceConfig.name || serviceConfig.provider || 'AI助手'
+      return
+    }
+
     // 从AppData目录的settings.json读取AI提供商信息
     const settingsContent = await invoke('read_settings_file') as string
     console.log('SSH终端读取到的设置内容长度:', settingsContent.length)
@@ -1582,44 +1956,13 @@ const sendAIRequest = async () => {
   aiResponse.value = ''
 
   try {
-    // 获取AI设置
-    const settingsContent = await invoke('read_settings_file') as string
-    console.log('发送AI请求时读取设置:', settingsContent)
-
-    let settings: any = {}
-
-    if (settingsContent) {
-      settings = JSON.parse(settingsContent)
-      console.log('解析后的设置:', settings)
+    // 与日志审计页使用同一 AI 配置来源，避免 settings.json 与本地缓存不一致
+    const serviceConfig = aiService.getConfig()
+    if (!serviceConfig || !aiService.isConfigured()) {
+      throw new Error('未检测到可用模型配置，请先在设置中的 AI 模型里完成配置。')
     }
-
-    // 如果后端设置文件没有AI配置，使用默认AI配置
-    if (!settings.ai) {
-      console.log('⚠️ 后端设置文件缺少AI配置，使用默认配置进行AI请求')
-      settings.ai = {
-        currentProvider: 'openai',
-        providers: {
-          openai: {
-            name: 'OpenAI',
-            apiKey: '',
-            model: 'gpt-3.5-turbo',
-            baseUrl: 'https://api.openai.com/v1'
-          }
-        }
-      }
-    }
-
-    if (!settings.ai || !settings.ai.currentProvider) {
-      throw new Error('AI配置异常，请检查设置')
-    }
-
-    const currentProvider = settings.ai.currentProvider
-    const providerConfig = settings.ai.providers[currentProvider]
-    console.log('AI提供商配置:', currentProvider, providerConfig)
-
-    if (!providerConfig) {
-      throw new Error('AI提供商配置不存在')
-    }
+    console.log('AI提供商配置(统一服务):', serviceConfig.provider, serviceConfig)
+    currentAIProvider.value = serviceConfig.name || serviceConfig.provider || 'AI助手'
 
     // 构建提示词：区分system和user消息
     let systemPrompt = ''
@@ -1654,89 +1997,33 @@ ${selectedContentPrompt.value.replace('请分析这段终端输出内容并提�
       userMessage = `用户需求：${aiInputText.value.trim()}`
     }
 
-    // 构建请求体 - 启用流式输出
-    const requestBody = {
-      model: providerConfig.model,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: userMessage
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 500,
-      stream: true  // 启用流式输出
-    }
-
-    console.log('📤 AI请求体:', requestBody)
     console.log('🤖 System Prompt:', systemPrompt)
-    console.log('👤 User Message:', userMessage)
+    console.log(' User Message:', userMessage)
 
-    // 使用本地代理发送请求，避免CORS问题
-    const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1'
-    const response = await fetch(API_BASE + '/ai/chat-proxy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        url: providerConfig.baseUrl + '/chat/completions',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${providerConfig.apiKey}`
-        },
-        body: requestBody,
-        timeout_seconds: 60
-      })
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('❌ AI API响应错误:', response.status, errorText)
-      throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`)
+    // 复用统一 AI 代理工具：自动适配 OpenAI/Claude/Ollama 等提供商
+    const proxyConfig: AIProviderConfig = {
+      ...serviceConfig,
+      provider: serviceConfig.provider,
+      temperature: serviceConfig.temperature ?? 0.3,
+      maxTokens: serviceConfig.maxTokens ?? 500,
+      timeoutSeconds: serviceConfig.timeoutSeconds ?? 60
     }
-
-    // 处理流式响应
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('无法获取响应流')
-    }
-
-    const decoder = new TextDecoder()
-    let fullContent = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n').filter(line => line.trim() !== '')
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6)
-          if (data === '[DONE]') continue
-
-          try {
-            const parsed = JSON.parse(data)
-            const content = parsed.choices?.[0]?.delta?.content || ''
-            if (content) {
-              fullContent += content
-              // 调用回调函数，实时更新UI
-              aiResponse.value += content
-            }
-          } catch (e) {
-            console.warn('解析流式数据失败:', e, data)
-          }
-        }
+    const fullContent = await streamAIProxyMessages(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage }
+      ],
+      proxyConfig,
+      (chunk) => {
+        aiResponse.value += chunk
       }
+    )
+    if (!fullContent) {
+      throw new Error('AI 返回为空，请检查当前模型配置')
     }
 
     console.log('✅ AI生成的命令:', fullContent)
+    aiResponse.value = fullContent
   } catch (error) {
     console.error('AI请求失败:', error)
     aiResponse.value = `错误: ${error}`
@@ -2070,6 +2357,8 @@ onUnmounted(() => {
       if (terminalInstance.unlisten) {
         try { terminalInstance.unlisten() } catch {}
       }
+
+      stopReceivingOutput(terminalInstance)
 
       // 关闭后端终端会话（重要：避免会话泄漏）
       if (terminalInstance.isConnected) {

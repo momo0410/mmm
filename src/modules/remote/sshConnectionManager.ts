@@ -98,10 +98,10 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
       });
       const t1 = Date.now();
       console.log(`[SSH connect] step=ssh_connect_direct end duration=${t1 - t0} ms`);
-      
+
       console.log('✅ [sshConnectionManager] Tauri invoke 返回成功');
 
-      // 步骤 2: 更新本地连接状态（提前，让内部状态立即可用）
+      // 步骤 2: 更新本地连接状态（暂存）
       const t2 = Date.now();
       this.connectionStatus = {
         host,
@@ -111,7 +111,31 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
         lastActivity: new Date()
       };
 
-      // 步骤 3: 立即通知监听器，让 UI 先可操作
+      // 步骤 3: 向后端做一次状态校验（非阻断），避免“先通知监听器再触发远程操作”的竞态。
+      // 增加短重试，避免后端刚建连时的瞬时状态抖动。
+      let verifiedStatus: SSHConnectionInfo | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        verifiedStatus = await this.checkConnectionStatus(false);
+        if (verifiedStatus?.connected) break;
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+        }
+      }
+      if (!verifiedStatus?.connected) {
+        console.warn('[SSH connect] 后端状态校验未通过，主动回收连接并报错');
+        const health = await invoke('ssh_get_connection_health').catch(() => null) as any;
+        try {
+          await invoke('ssh_disconnect_direct');
+        } catch {
+          // 忽略回收失败
+        }
+        this.connectionStatus = null;
+        const reason = health?.last_note || '后端连接不可用';
+        throw new Error(`SSH连接状态校验失败：${reason}`);
+      }
+      this.connectionStatus = verifiedStatus;
+
+      // 步骤 4: 在校验后统一通知监听器，减少刚连接即触发SFTP/命令探测导致的抖动
       const tNotifyStart = Date.now();
       console.log('[SSH connect] step=notifyListeners start');
       this.notifyListeners();
@@ -120,13 +144,13 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
       console.log(`[SSH connect] step=state_update end duration=${Date.now() - t2} ms`);
       console.log(`[SSH connect] ✅ 连接成功，UI 现已可操作（总耗时 ${Date.now() - connectStart} ms）`);
 
-      // 步骤 4: 后台保存连接配置（不阻塞）
+      // 步骤 5: 后台保存连接配置（不阻塞）
       console.log('[SSH connect] step=saveConnectionConfig start (background)');
-      this.saveConnectionConfig(host, port, username).catch(err => {
+      this.saveConnectionConfig(host, port, username, password).catch(err => {
         console.error('[SSH connect] step=saveConnectionConfig error:', err);
       });
 
-      // 步骤 5: 后台初始化终端工作目录（不阻塞）
+      // 步骤 6: 后台初始化终端工作目录（不阻塞）
       console.log('[SSH connect] step=initializeWorkingDirectory scheduled (background)');
       if ((window as any).terminalManager && (window as any).terminalManager.initializeWorkingDirectory) {
         setTimeout(() => {
@@ -144,6 +168,8 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
 
     } catch (error) {
       console.error('SSH连接失败:', error);
+      this.connectionStatus = null;
+      this.notifyListeners();
       throw error;
     }
   }
@@ -175,17 +201,26 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
   }
 
   /**
-   * 保存连接配置
+   * 保存连接配置（含加密密码）
    */
-  private async saveConnectionConfig(host: string, port: number, username: string): Promise<void> {
+  private async saveConnectionConfig(host: string, port: number, username: string, password: string): Promise<void> {
     try {
       // 检查是否已存在相同的连接配置
       const existingConnections = this.configManager.getConnections();
-      const exists = existingConnections.some(conn =>
+      const existing = existingConnections.find(conn =>
         conn.host === host && conn.port === port && conn.username === username
       );
 
-      if (!exists) {
+      let encryptedPassword: string | undefined;
+      if (password) {
+        try {
+          encryptedPassword = await invoke('encrypt_password', { password }) as string;
+        } catch (e) {
+          console.warn('密码加密失败，将保存无密码配置:', e);
+        }
+      }
+
+      if (!existing) {
         // 创建新的连接配置
         const connectionName = `${username}@${host}:${port}`;
         await this.configManager.addConnection({
@@ -194,6 +229,7 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
           port,
           username,
           authType: 'password' as const,
+          encryptedPassword,
           tags: ['auto-saved'],
           accounts: [{
             username,
@@ -202,6 +238,12 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
           }]
         });
         console.log('✅ 连接配置已自动保存:', connectionName);
+      } else if (encryptedPassword && !existing.encryptedPassword) {
+        // 更新现有配置的密码
+        await this.configManager.updateConnection(existing.id, {
+          encryptedPassword
+        });
+        console.log('✅ 连接配置密码已更新:', existing.name);
       }
     } catch (error) {
       console.error('保存连接配置失败:', error);
@@ -219,23 +261,44 @@ export class SSHConnectionManager extends EventEmitter<SSHConnectionInfo | null>
   /**
    * 检查连接状态（从后端获取最新状态）
    */
-  async checkConnectionStatus(): Promise<SSHConnectionInfo | null> {
+  async checkConnectionStatus(notify: boolean = true): Promise<SSHConnectionInfo | null> {
     try {
       const status = await invoke('ssh_get_connection_status');
       if (status) {
-        this.connectionStatus = {
+        const snapshot: SSHConnectionInfo = {
           host: status.host,
           port: status.port,
           username: status.username,
           connected: status.connected,
           lastActivity: new Date(status.last_activity)
         };
-        this.notifyListeners();
+        this.connectionStatus = snapshot;
+        if (notify) this.notifyListeners();
+        return snapshot;
       } else {
-        this.connectionStatus = null;
-        this.notifyListeners();
+        // 在静默校验模式下（notify=false），保留当前本地状态，避免连接建立阶段被瞬时探测结果反向清空。
+        if (notify) {
+          // 后端返回 null 可能是瞬时会话拥塞导致活性探测失败，不立即清除连接状态。
+          // 增加一次重试：等待 500ms 后再次检查，只有连续两次都返回 null 才确认断开。
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const retryStatus = await invoke('ssh_get_connection_status');
+          if (!retryStatus) {
+            this.connectionStatus = null;
+            this.notifyListeners();
+          } else {
+            this.connectionStatus = {
+              host: retryStatus.host,
+              port: retryStatus.port,
+              username: retryStatus.username,
+              connected: retryStatus.connected,
+              lastActivity: new Date(retryStatus.last_activity)
+            };
+            this.notifyListeners();
+            return this.connectionStatus;
+          }
+        }
+        return null;
       }
-      return this.connectionStatus;
     } catch (error) {
       console.error('检查SSH连接状态失败:', error);
       return null;

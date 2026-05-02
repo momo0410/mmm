@@ -1,13 +1,13 @@
 @echo off
 :: ============================================
-:: LovelyRes Auto Start Script
+:: SDIT Auto Start Script
 :: Using Windows Terminal (wt.exe) for better UI
 :: ============================================
 
 chcp 65001 >nul 2>&1
 
 echo ========================================
-echo   LovelyRes Auto Start
+echo   SDIT Auto Start
 echo ========================================
 echo.
 

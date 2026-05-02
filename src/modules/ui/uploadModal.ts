@@ -2,13 +2,14 @@
  * 文件上传模态对话框
  */
 
-import { invoke } from '../../shims/@tauri-apps/api/core';
+import pythonApi from '../../config/python-api.config';
 
 export class UploadModal {
   private modal: HTMLElement | null = null;
   private isVisible: boolean = false;
   private currentTargetDir: string = '';
   private selectedFiles: File[] = [];
+  private uploadCancelled: boolean = false;
 
   constructor() {
     this.createModal();
@@ -297,6 +298,7 @@ export class UploadModal {
 
     this.currentTargetDir = targetDir;
     this.selectedFiles = [];
+    this.uploadCancelled = false;
     this.isVisible = true;
 
     // 更新目标目录显示
@@ -321,7 +323,8 @@ export class UploadModal {
 
   public hide(): void {
     if (!this.modal) return;
-    
+
+    this.uploadCancelled = true;
     this.modal.style.display = 'none';
     this.isVisible = false;
     this.currentTargetDir = '';
@@ -440,6 +443,72 @@ export class UploadModal {
     }
   }
 
+  private buildUploadId(file: File): string {
+    const rand = Math.random().toString(36).slice(2, 10);
+    return `sftp-${Date.now()}-${file.size}-${rand}`;
+  }
+
+  private async wait(ms: number): Promise<void> {
+    await new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
+  private async uploadFileWithProgress(
+    file: File,
+    remotePath: string,
+    uploadedBytesBefore: number,
+    totalBytes: number,
+  ): Promise<void> {
+    const uploadId = this.buildUploadId(file);
+    let lastTransferred = 0;
+    let uploadFinished = false;
+    let uploadError: unknown = null;
+
+    const pollProgress = async () => {
+      while (!this.uploadCancelled) {
+        try {
+          const progress = await pythonApi.sftpGetUploadProgress(uploadId);
+          lastTransferred = Math.max(lastTransferred, progress.transferred_bytes || 0);
+          const overallBytes = Math.min(uploadedBytesBefore + lastTransferred, totalBytes);
+          this.updateProgress(totalBytes > 0 ? (overallBytes / totalBytes) * 100 : 0);
+
+          if (progress.done) {
+            if (!progress.success && progress.error) {
+              throw new Error(progress.error);
+            }
+            break;
+          }
+        } catch (error) {
+          if (uploadFinished) break;
+          if (error instanceof Error && error.message.includes('未找到上传进度')) {
+            await this.wait(120);
+            continue;
+          }
+          throw error;
+        }
+
+        if (uploadFinished) break;
+        await this.wait(120);
+      }
+    };
+
+    const uploadPromise = pythonApi.sftpUploadDirect(file, remotePath, uploadId)
+      .catch((error) => {
+        uploadError = error;
+        throw error;
+      })
+      .finally(() => {
+        uploadFinished = true;
+      });
+
+    await Promise.all([uploadPromise, pollProgress()]);
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    this.updateProgress(totalBytes > 0 ? ((uploadedBytesBefore + file.size) / totalBytes) * 100 : 100);
+  }
+
   private joinRemotePath(dir: string, name: string): string {
     const base = dir.endsWith('/') ? dir.slice(0, -1) : dir;
     if (!base) return `/${name}`;
@@ -457,25 +526,25 @@ export class UploadModal {
     confirmBtn.disabled = true;
     cancelBtn.disabled = true;
     confirmBtn.textContent = '上传中...';
+    this.uploadCancelled = false;
+    this.updateProgress(0);
 
     try {
-      const totalFiles = this.selectedFiles.length;
+      const totalBytes = this.selectedFiles.reduce((sum, file) => sum + file.size, 0);
       let completedFiles = 0;
+      let uploadedBytes = 0;
 
       for (const file of this.selectedFiles) {
         // 构建远程文件路径
         const remotePath = this.joinRemotePath(this.currentTargetDir, file.name);
 
         try {
-          // 直接通过 multipart 上传文件到远程（无需 save_temp_file 中转）
           console.log(`📤 上传文件: ${file.name} (${(file.size / 1024).toFixed(1)}KB) -> ${remotePath}`);
-          await invoke('sftp_upload_direct', {
-            file: file,
-            remotePath: remotePath
-          });
+          await this.uploadFileWithProgress(file, remotePath, uploadedBytes, totalBytes);
 
           completedFiles++;
-          this.updateProgress((completedFiles / totalFiles) * 100);
+          uploadedBytes += file.size;
+          this.updateProgress(totalBytes > 0 ? (uploadedBytes / totalBytes) * 100 : 100);
 
         } catch (error) {
           console.error(`上传文件失败: ${file.name}`, error);

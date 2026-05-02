@@ -1,5 +1,4 @@
 import {
-  requestAIProxyMessages,
   streamAIProxyMessages,
   type AIChatMessage,
   type AIProviderConfig,
@@ -250,8 +249,8 @@ export class AIService {
 
   async testConnection(): Promise<string> {
     const config = ensureConfig(this.getConfig())
-    const result = await requestAIProxyMessages(
-      [{ role: 'user', content: '请只回复“连接成功”。' }],
+    const result = await streamAIProxyMessages(
+      [{ role: 'user', content: '请只回复"连接成功"。' }],
       {
         ...config,
         maxTokens: 64,
@@ -268,7 +267,7 @@ export class AIService {
     serverInfo: string = ''
   ): Promise<string> {
     const config = ensureConfig(this.getConfig())
-    return requestAIProxyMessages(
+    return streamAIProxyMessages(
       buildSolutionMessages(title, description, severity, serverInfo, false),
       config
     )
@@ -318,6 +317,33 @@ export class AIService {
       {
         role: 'user',
         content: `日志来源：${logSource || '未指定'}\n\n日志内容：\n${logContent}`,
+      },
+    ]
+
+    return this.chatStream(messages, onChunk, onComplete)
+  }
+
+  async analyzeCommandOutputStream(
+    command: string,
+    output: string,
+    title: string,
+    onChunk?: (chunk: string) => void,
+    onComplete?: (finalText: string) => void
+  ): Promise<string> {
+    const messages: AIChatMessage[] = [
+      {
+        role: 'system',
+        content: `你是一位资深 Linux 安全运维专家。请分析以下命令输出结果，给出专业的安全评估和建议。
+请用中文输出，结构如下：
+1. 执行摘要（简要说明命令目的和输出概况）
+2. 安全风险分析（识别潜在的安全隐患、异常配置、权限问题等）
+3. 影响评估（评估问题的严重程度和影响范围）
+4. 修复建议（给出具体、可执行的修复命令或配置修改方案）
+5. 最佳实践（相关的安全加固建议）`,
+      },
+      {
+        role: 'user',
+        content: `检查项：${title || '未指定'}\n\n执行命令：\n\`\`\`bash\n${command}\n\`\`\`\n\n命令输出：\n\`\`\`\n${output}\n\`\`\`\n\n请基于以上输出进行专业分析。`,
       },
     ]
 

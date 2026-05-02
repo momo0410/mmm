@@ -1,5 +1,5 @@
 /**
- * LovelyRes 主入口文件
+ * SDIT 主入口文件
  * Linux Emergency Response Tool
  */
 
@@ -9,28 +9,27 @@ import './styles/system-info.css';
 import './styles/log-analysis.css';
 
 import { invoke as shimInvoke } from './shims/@tauri-apps/api/core';
-import { LovelyResApp } from './modules/core/app';
+import { SDITApp } from './modules/core/app';
 import { remoteOperationsManager } from './modules/remote/remoteOperationsManager';
 
 import { emergencyPageManager } from './modules/emergency/emergencyPageManager';
+// 确保实例在 window 上可用（供 modernUIRenderer 的页面激活钩子调用）
+(window as any).emergencyPageManager = emergencyPageManager;
 import { sshConnectionManager } from './modules/remote/sshConnectionManager';
 import { quickDetectionManager } from './modules/detection/quickDetectionManager';
 import { SettingsManager } from './modules/settings/settingsManager';
 import { SettingsPageManager } from './modules/settings/settingsPageManager';
 import { aiService } from './modules/ai/aiService';
-import { ProcessContextMenu } from './modules/ui/processContextMenu';
-import { NetworkContextMenu } from './modules/ui/networkContextMenu';
-import { ServiceContextMenu } from './modules/ui/serviceContextMenu';
-import { UserContextMenu } from './modules/ui/userContextMenu';
-import { StartupContextMenu } from './modules/ui/startupContextMenu';
-import { CronContextMenu } from './modules/ui/cronContextMenu';
-import { FirewallContextMenu } from './modules/ui/firewallContextMenu';
 
 // 全局变量
 import { sftpManager } from './modules/remote/sftpManager';
 import { UploadModal } from './modules/ui/uploadModal';
 import { CreateFolderModal } from './modules/ui/createFolderModal';
-import { mountPayloader, unmountPayloader } from './modules/payloader/mountPayloader';
+import { showPayloader, hidePayloader } from './modules/payloader/mountPayloader';
+
+// 注册到全局供 modernUIRenderer 页面激活钩子调用
+(window as any).showPayloader = showPayloader;
+(window as any).hidePayloader = hidePayloader;
 
 // 创建设置管理器实例
 const settingsManager = new SettingsManager();
@@ -92,26 +91,6 @@ function openAISettingsMenu(): void {
   });
 }
 
-// 创建进程右键菜单实例
-const processContextMenu = new ProcessContextMenu();
-
-// 创建网络连接右键菜单实例
-const networkContextMenu = new NetworkContextMenu();
-
-// 创建系统服务右键菜单实例
-const serviceContextMenu = new ServiceContextMenu();
-
-// 创建用户列表右键菜单实例
-const userContextMenu = new UserContextMenu();
-
-// 创建自启动右键菜单实例
-const startupContextMenu = new StartupContextMenu();
-
-// 创建计划任务右键菜单实例
-const cronContextMenu = new CronContextMenu();
-
-// 创建防火墙右键菜单实例
-const firewallContextMenu = new FirewallContextMenu();
 
 import { sshConnectionDialog } from './modules/ui/sshConnectionDialog';
 import { sshTerminalManager } from './modules/ssh/sshTerminalManager';
@@ -144,12 +123,9 @@ async function openSSHTerminalWindow(): Promise<void> {
     // 创建新窗口
     console.log('🆕 创建新的SSH终端窗口');
 
-    // 检测平台，macOS 使用原生标题栏，其他平台使用自定义标题栏
-    const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
     const sshWindow = new WebviewWindow('ssh-terminal', {
       url: '/ssh-terminal.html',
-      title: 'SSH Terminal - Linux Emergency Response Tool',
+      title: '安御智测',
       width: 1000,
       height: 700,
       minWidth: 600,
@@ -159,7 +135,7 @@ async function openSSHTerminalWindow(): Promise<void> {
       minimizable: true,
       closable: true,
       center: true,
-      decorations: isMacOS, // macOS 使用原生标题栏，其他平台使用自定义标题栏
+      decorations: false, // 隐藏系统标题栏，使用全自定义标题栏
       alwaysOnTop: false,
       skipTaskbar: false
     });
@@ -211,7 +187,7 @@ async function openSSHTerminalWindow(): Promise<void> {
 
 
 // 全局应用实例
-let app: LovelyResApp;
+let app: SDITApp;
 import { FileViewerModal } from './modules/ui/fileViewerModal';
 import { PermissionsModal } from './modules/ui/permissionsModal';
 import { EmergencyResultModal } from './modules/ui/emergencyModal';
@@ -228,17 +204,17 @@ import { LogContextMenu } from './modules/ui/logContextMenu';
 
 async function initializeApp() {
   if (hasInitializedApp || isInitializingApp) {
-    console.warn('LovelyRes 已初始化或正在初始化，跳过重复启动。');
+    console.warn('SDIT 已初始化或正在初始化，跳过重复启动。');
     return;
   }
 
   isInitializingApp = true;
 
   try {
-  console.log('🚀 LovelyRes 启动中...');
+  console.log('🚀 SDIT 启动中...');
 
   // 创建应用实例
-  app = new LovelyResApp();
+  app = new SDITApp();
 
   // 初始化应用
   // 初始化模态组件
@@ -276,7 +252,7 @@ async function initializeApp() {
 
   await app.initialize();
 
-  console.log('✅ LovelyRes 启动完成');
+  console.log('✅ SDIT 启动完成');
   hasInitializedApp = true;
 
     // 移除加载屏幕
@@ -317,11 +293,15 @@ async function initializeApp() {
     (window as any).uploadModal = uploadModal;
     (window as any).createFolderModal = createFolderModal;
 
-    (window as any).sftpRefresh = () => {
+    (window as any).sftpRefresh = async () => {
       try {
         if (sftpManager && (sftpManager as any).refreshCurrentDirectory) {
-          (sftpManager as any).refreshCurrentDirectory();
-          (window as any).showNotification && (window as any).showNotification('文件列表已刷新', 'success');
+          const ok = await (sftpManager as any).refreshCurrentDirectory();
+          if (ok) {
+            (window as any).showNotification && (window as any).showNotification('文件列表已刷新', 'success');
+          } else {
+            (window as any).showNotification && (window as any).showNotification('刷新失败，请检查 SSH/SFTP 状态后重试', 'warning');
+          }
         } else {
           console.warn('sftpManager.refreshCurrentDirectory 不可用');
         }
@@ -485,6 +465,76 @@ async function initializeApp() {
     (window as any).hideSettingsOverlay = hideSettingsOverlay;
 
     (window as any).sshConnectionDialog = sshConnectionDialog;
+
+    (window as any).showConnectionProgress = (message: string) => {
+      const existing = document.getElementById('ssh-connection-progress-overlay');
+      if (existing) return;
+
+      const petals = Array.from({ length: 8 }, () =>
+        `<div class="ssh-connection-petal"></div>`
+      ).join('');
+
+      const overlay = document.createElement('div');
+      overlay.id = 'ssh-connection-progress-overlay';
+      overlay.className = 'ssh-connection-progress-overlay';
+      overlay.innerHTML = `
+        <div class="ssh-connection-petal-field">${petals}</div>
+        <div class="ssh-connection-progress-card">
+          <h4 class="ssh-connection-progress-title">正在建立 SSH 连接</h4>
+          <p class="ssh-connection-progress-desc">${message}</p>
+          <div class="ssh-connection-progress-row">
+            <div class="ssh-connection-progress-track">
+              <div id="ssh-connection-progress-bar" class="ssh-connection-progress-bar"></div>
+            </div>
+            <span id="ssh-connection-progress-percent" class="ssh-connection-progress-percent">0%</span>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      let progress = 0;
+      const bar = document.getElementById('ssh-connection-progress-bar');
+      const pct = document.getElementById('ssh-connection-progress-percent');
+      const steps = [
+        { target: 20, delay: 400 },
+        { target: 45, delay: 600 },
+        { target: 70, delay: 800 },
+        { target: 90, delay: 1000 },
+        { target: 95, delay: 1200 },
+      ];
+      steps.forEach(({ target, delay }) => {
+        setTimeout(() => {
+          progress = target;
+          if (bar) bar.style.width = `${target}%`;
+          if (pct) pct.textContent = `${target}%`;
+        }, delay);
+      });
+
+      (window as any)._sshProgressInterval = setInterval(() => {
+        if (progress < 95) {
+          progress += Math.random() * 2;
+          if (bar) bar.style.width = `${progress}%`;
+          if (pct) pct.textContent = `${Math.round(progress)}%`;
+        }
+      }, 300);
+    };
+
+    (window as any).hideConnectionProgress = () => {
+      clearInterval((window as any)._sshProgressInterval);
+      const bar = document.getElementById('ssh-connection-progress-bar');
+      const pct = document.getElementById('ssh-connection-progress-percent');
+      if (bar) bar.style.width = '100%';
+      if (pct) pct.textContent = '100%';
+
+      setTimeout(() => {
+        const overlay = document.getElementById('ssh-connection-progress-overlay');
+        if (overlay) {
+          overlay.style.transition = 'opacity 0.3s ease';
+          overlay.style.opacity = '0';
+          setTimeout(() => overlay.remove(), 300);
+        }
+      }, 200);
+    };
 
     // SFTP UI helpers: sorting + context menu
     (window as any).setSftpSortMode = (mode: 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'modified-asc' | 'modified-desc') => {
@@ -983,7 +1033,7 @@ async function initializeApp() {
     };
 
   } catch (error) {
-    console.error('❌ LovelyRes 启动失败:', error);
+    console.error('❌ SDIT 启动失败:', error);
 
     // 移除加载屏幕，确保错误信息可见
     const loadingScreen = document.getElementById('loading-screen');
@@ -1008,7 +1058,7 @@ async function initializeApp() {
           <div style="font-size: 48px; margin-bottom: 24px;">❌</div>
           <h2 style="margin-bottom: 16px;">应用启动失败</h2>
           <p style="color: #64748b; text-align: center; max-width: 400px;">
-            LovelyRes 在启动过程中遇到了问题。请检查控制台获取详细错误信息。
+            SDIT 在启动过程中遇到了问题。请检查控制台获取详细错误信息。
           </p>
           <button onclick="location.reload()" style="
             margin-top: 24px;
@@ -1087,7 +1137,7 @@ async function initializeApp() {
 window.addEventListener('beforeunload', () => {
   if (app) {
     // 这里可以添加清理逻辑
-    console.log('🧹 LovelyRes 正在清理资源...');
+    console.log('🧹 SDIT 正在清理资源...');
   }
 });
 
@@ -1340,7 +1390,7 @@ window.addEventListener('unhandledrejection', (event) => {
 /**
  * 设置全局模态框函数
  */
-function setupGlobalModalFunctions(app: LovelyResApp) {
+function setupGlobalModalFunctions(app: SDITApp) {
   // 将应用实例暴露到全局，供其他函数使用
   (window as any).app = app;
 
@@ -1349,6 +1399,66 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
     detailedInfo: null,
     lastUpdate: null,
     isLoading: false
+  };
+
+  // 系统信息分页状态
+  (window as any).systemInfoPagination = {
+    processes: { page: 1, pageSize: 33, total: 0 },
+    network: { page: 1, pageSize: 33, total: 0 },
+    services: { page: 1, pageSize: 33, total: 0 },
+    users: { page: 1, pageSize: 33, total: 0 },
+    autostart: { page: 1, pageSize: 33, total: 0 },
+    cron: { page: 1, pageSize: 33, total: 0 },
+    firewall: { page: 1, pageSize: 33, total: 0 },
+  };
+
+  // 分页渲染辅助函数
+  (window as any).paginateData = (data: any[], tabId: string) => {
+    const pagination = (window as any).systemInfoPagination[tabId];
+    if (!pagination) return { data: data, start: 0, end: data.length, total: data.length };
+    const start = (pagination.page - 1) * pagination.pageSize;
+    const end = start + pagination.pageSize;
+    return { data: data.slice(start, end), start, end, total: data.length };
+  };
+
+  // 渲染分页控件
+  (window as any).renderPaginationControls = (tabId: string, total: number) => {
+    const pagination = (window as any).systemInfoPagination[tabId];
+    if (!pagination || total <= pagination.pageSize) return '';
+    const totalPages = Math.ceil(total / pagination.pageSize);
+    const currentPage = pagination.page;
+    const hasPrev = currentPage > 1;
+    const hasNext = currentPage < totalPages;
+
+    return `
+      <div class="table-pagination">
+        <div class="pagination-info">
+          <span>共 ${total} 条，第 ${currentPage}/${totalPages} 页</span>
+        </div>
+        <div class="pagination-buttons">
+          <button class="pagination-btn" ${!hasPrev ? 'disabled' : ''} onclick="window.changeSystemInfoPage('${tabId}', -1)">
+            上一页
+          </button>
+          <button class="pagination-btn" ${!hasNext ? 'disabled' : ''} onclick="window.changeSystemInfoPage('${tabId}', 1)">
+            下一页
+          </button>
+        </div>
+      </div>
+    `;
+  };
+
+  // 切换分页
+  (window as any).changeSystemInfoPage = (tabId: string, delta: number) => {
+    const pagination = (window as any).systemInfoPagination[tabId];
+    if (!pagination) return;
+    pagination.page += delta;
+    if (pagination.page < 1) pagination.page = 1;
+    // 重新加载当前 tab 数据
+    const cache = (window as any).systemInfoCache;
+    const detailedInfo = cache.detailedInfo;
+    if (detailedInfo) {
+      (window as any).loadSystemInfoTabData(tabId, detailedInfo);
+    }
   };
 
   // 显示服务器模态框
@@ -1446,19 +1556,22 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       const res = await fetch(`${base}/skills`);
       const data = await res.json();
       const items = data.items || [];
-      let html = '';
+      let html = '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">';
       for (const item of items) {
         html += `
-          <div class="skill-item" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; background: var(--bg-secondary);">
-            <input type="checkbox" class="skill-checkbox" data-filename="${item.filename}" style="accent-color: var(--accent-color);">
-            <div style="flex: 1; min-width: 0;">
-              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${item.name}</div>
-              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.description || item.filename}</div>
+          <div class="skill-item" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);">
+            <div style="display: flex; align-items: flex-start; gap: 8px;">
+              <input type="checkbox" class="skill-checkbox" data-filename="${item.filename}" style="accent-color: var(--accent-color); margin-top: 2px; flex-shrink: 0;">
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600; font-size: 13px; color: var(--text-primary); line-height: 1.3; word-break: break-word;">${item.name}</div>
+              </div>
             </div>
+            <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${item.description || item.name}</div>
           </div>
         `;
       }
-      if (!html) html = `<div style="text-align: center; color: var(--text-secondary); padding: 40px;">暂无 Skills</div>`;
+      html += '</div>';
+      if (items.length === 0) html = `<div style="text-align: center; color: var(--text-secondary); padding: 40px;">暂无 Skills</div>`;
       container.innerHTML = html;
     } catch (e) {
       container.innerHTML = `<div style="text-align: center; color: var(--error-color); padding: 40px;">加载失败</div>`;
@@ -2104,10 +2217,16 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
   (window as any).refreshDashboard = () => {
     try {
       if (app) {
-        // 重新渲染主工作区
-        const mainWorkspace = document.querySelector('.main-workspace');
-        if (mainWorkspace) {
-          mainWorkspace.innerHTML = app.getStateManager().getUIRenderer().renderMainWorkspace();
+        // 使用容器化刷新：仅更新仪表盘页面容器，不影响其他页面
+        const renderer = app.getStateManager().getUIRenderer();
+        if (typeof renderer.refreshPageContainer === 'function') {
+          renderer.refreshPageContainer('dashboard');
+        } else {
+          // 回退：旧方式刷新主工作区
+          const mainWorkspace = document.querySelector('.main-workspace');
+          if (mainWorkspace) {
+            mainWorkspace.innerHTML = renderer.renderMainWorkspace();
+          }
         }
         console.log('✅ 仪表盘已刷新');
       }
@@ -2406,6 +2525,11 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
             // 连接成功后在后台加载系统摘要信息（轻量版），避免阻塞连接完成。
             void (async () => {
               try {
+                const liveStatus = await sshConnectionManager.checkConnectionStatus(false);
+                if (!liveStatus?.connected) {
+                  console.debug('跳过系统摘要初始化：后端连接状态不可用');
+                  return;
+                }
                 console.log('📊 正在后台获取系统摘要信息（轻量版）...');
                 await sshManager.fetchSystemSummary();
 
@@ -2914,100 +3038,28 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       return;
     }
 
-    // 数据库功能暂未实现，拦截跳转
     if (pageId === 'database') {
       console.log(' [PageSwitch] 数据库功能暂未实现');
       (window as any).showFeatureNotImplementedDialog?.('数据库');
       return;
     }
 
-    // 更新导航项状态
-    document.querySelectorAll('.nav-item').forEach(item => {
-      const htmlItem = item as HTMLElement;
-      const navId = htmlItem.getAttribute('data-nav-id');
-      htmlItem.classList.toggle('active', navId === pageId);
-    });
+    // SSH 终端在独立窗口中打开
+    if (pageId === 'ssh-terminal') {
+      openSSHTerminalWindow();
+      setTimeout(() => {
+        const app = (window as any).app;
+        if (app?.switchToPage) {
+          app.switchToPage('dashboard');
+        }
+      }, 100);
+      return;
+    }
 
-    // 通过状态管理器切换页面
-    console.log(`🔄 [PageSwitch] 切换到页面: ${pageId}`);
-
+    // 使用容器化页面切换（不销毁 DOM，保留所有页面状态）
     const app = (window as any).app;
-    if (app && app.stateManager) {
-      app.stateManager.setCurrentPage(pageId);
-      // 重新渲染UI
-      app.render();
-
-      const previousPage = app.stateManager.getState().previousPage;
-
-      if (pageId === 'emergency-commands') {
-        console.log('🚨 [PageSwitch] 初始化应急响应页面');
-        emergencyPageManager.initialize();
-      } else if (pageId === 'log-analysis') {
-        console.log('📋 [PageSwitch] 初始化日志审计页面');
-        setTimeout(() => {
-          (window as any).refreshLogAnalysis();
-        }, 200);
-      } else if (pageId === 'ssh-terminal') {
-        openSSHTerminalWindow();
-        setTimeout(() => {
-          const app = (window as any).app;
-          if (app && app.stateManager) {
-            app.stateManager.setCurrentPage('dashboard');
-            app.render();
-          }
-        }, 100);
-      } else if (pageId === 'payloader') {
-        console.log('🔧 [PageSwitch] 挂载 Payloader Vue 模块');
-        setTimeout(() => {
-          mountPayloader();
-        }, 50);
-      }
-
-      if (previousPage === 'payloader' && pageId !== 'payloader') {
-        console.log('🧹 [PageSwitch] 离开 Payloader 页面，卸载模块');
-        unmountPayloader();
-      }
-
-      // 根据页面类型决定加载策略
-      const isConnected = sshConnectionManager.isConnected();
-
-      if (isConnected) {
-        if (pageId === 'system-info') {
-          // system-info 页面：需要加载详细信息（进程/网络/服务等）
-          console.log('🔄 [PageSwitch] 切换到系统信息页，加载详细数据');
-          const cache = (window as any).systemInfoCache;
-          if (cache) {
-            cache.isLoading = false;
-          }
-          (window as any).loadSystemDetailedInfo(false); // 不强制刷新，使用缓存优先
-        } else if (pageId === 'dashboard') {
-          // dashboard 页面：仅使用 summary 数据，不自动加载详细信息
-          console.log('🔄 [PageSwitch] 切换到仪表盘，使用摘要数据');
-          // 如果已有 summary 数据，直接渲染；否则后台获取 summary
-          const app = (window as any).app;
-          if (app && app.sshManager && !app.sshManager.getSystemInfo()) {
-            void (async () => {
-              try {
-                await app.sshManager.fetchSystemSummary();
-                app.render();
-              } catch (error) {
-                console.warn('⚠️ 获取系统摘要失败:', error);
-              }
-            })();
-          }
-          // 启动仪表盘自动刷新（仅刷新 summary）
-          (window as any).startDashboardAutoRefresh();
-        }
-      } else {
-        // 未连接时离开仪表盘页面，停止自动刷新
-        (window as any).stopDashboardAutoRefresh();
-
-        if (pageId === 'dashboard' || pageId === 'system-info') {
-          console.log('⚠️ 未连接服务器，跳过系统信息加载');
-        }
-      }
-
-      // 远程操作页面的初始化由renderRemoteOperationsPage中的定时器处理
+    if (app?.switchToPage) {
+      app.switchToPage(pageId);
     }
   };
 
@@ -3078,6 +3130,13 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       // 检查是否正在加载
       if (cache.tabLoading?.[tabId] && !forceRefresh) {
         console.log(`⏳ tab[${tabId}] 正在加载中...`);
+        return null;
+      }
+
+      // 发起 tab 详情拉取前，先确认后端实时连接状态
+      const liveStatus = await sshConnectionManager.checkConnectionStatus(false);
+      if (!liveStatus?.connected) {
+        console.debug(`跳过 tab[${tabId}] 懒加载：后端连接状态不可用`);
         return null;
       }
 
@@ -3313,12 +3372,8 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
   // 更新进程表格
   (window as any).updateProcessesTable = (processes: any[]) => {
     const tbody = document.getElementById('processes-table-body');
+    const paginationContainer = document.getElementById('processes-pagination');
     if (!tbody) return;
-
-    // 禁用进程表格区域的默认右键菜单
-    tbody.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-    });
 
     if (!processes || processes.length === 0) {
       tbody.innerHTML = `
@@ -3328,6 +3383,7 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
@@ -3341,48 +3397,33 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       userFilter.value = currentValue; // 保持当前选择
     }
 
-    tbody.innerHTML = processes.map((process) => `
-      <tr data-pid="${process.pid}" class="process-row" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${process.pid}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${process.user}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light); font-family: monospace;">${process.stat || '-'}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${process.cpu}%</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${process.memory}%</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${process.command}">${process.command}</td>
+    // 分页
+    const paginated = (window as any).paginateData(processes, 'processes');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((process: any) => `
+      <tr data-pid="${process.pid}" class="process-row">
+        <td>${process.pid}</td>
+        <td>${process.user}</td>
+        <td style="font-family: monospace;">${process.stat || '-'}</td>
+        <td>${process.cpu}%</td>
+        <td>${process.memory}%</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${process.command}">${process.command}</td>
       </tr>
     `).join('');
 
-    // 添加右键事件监听
-    tbody.querySelectorAll('tr[data-pid]').forEach(row => {
-      row.addEventListener('contextmenu', (e: Event) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('processes', paginated.total);
+    }
 
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const pid = (row as HTMLElement).getAttribute('data-pid');
-        if (pid) {
-          processContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, pid);
-        }
-      });
-    });
   };
 
   // 更新网络表格
   (window as any).updateNetworkTable = (networkDetails: any[]) => {
     const tbody = document.getElementById('network-table-body');
+    const paginationContainer = document.getElementById('network-pagination');
     if (!tbody) return;
-
-    // 禁用网络表格区域的默认右键菜单
-    tbody.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-    });
 
     if (!networkDetails || networkDetails.length === 0) {
       tbody.innerHTML = `
@@ -3392,56 +3433,35 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = networkDetails.map((conn) => `
-      <tr class="network-row" data-protocol="${conn.protocol}" data-local="${conn.localAddress}" data-foreign="${conn.foreignAddress}" data-state="${conn.state}" data-pid="${conn.pid || '-'}" data-process="${conn.process}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${conn.protocol}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${conn.localAddress}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${conn.foreignAddress}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${conn.state}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${conn.pid || '-'}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary);">${conn.process}</td>
+    // 分页
+    const paginated = (window as any).paginateData(networkDetails, 'network');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((conn: any) => `
+      <tr class="network-row" data-protocol="${conn.protocol}" data-local="${conn.localAddress}" data-foreign="${conn.foreignAddress}" data-state="${conn.state}" data-pid="${conn.pid || '-'}" data-process="${conn.process}">
+        <td>${conn.protocol}</td>
+        <td>${conn.localAddress}</td>
+        <td>${conn.foreignAddress}</td>
+        <td>${conn.state}</td>
+        <td>${conn.pid || '-'}</td>
+        <td>${conn.process}</td>
       </tr>
     `).join('');
 
-    // 添加右键事件监听
-    tbody.querySelectorAll('tr[data-protocol]').forEach(row => {
-      row.addEventListener('contextmenu', (e: Event) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const protocol = (row as HTMLElement).getAttribute('data-protocol') || '';
-        const localAddress = (row as HTMLElement).getAttribute('data-local') || '';
-        const foreignAddress = (row as HTMLElement).getAttribute('data-foreign') || '';
-        const state = (row as HTMLElement).getAttribute('data-state') || '';
-        const pid = (row as HTMLElement).getAttribute('data-pid') || '-';
-        const process = (row as HTMLElement).getAttribute('data-process') || '';
-
-        networkContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, {
-          protocol,
-          localAddress,
-          foreignAddress,
-          state,
-          pid,
-          process
-        });
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('network', paginated.total);
+    }
   };
 
   // 更新系统服务表格
   (window as any).updateServicesTable = (services: any[]) => {
     const tbody = document.getElementById('services-table-body');
+    const paginationContainer = document.getElementById('services-pagination');
     if (!tbody) return;
 
     if (!services || services.length === 0) {
@@ -3452,6 +3472,7 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
@@ -3465,44 +3486,33 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       statusFilter.value = currentValue; // 保持当前选择
     }
 
-    tbody.innerHTML = services.map((service) => `
-      <tr data-service-name="${service.name}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${service.name}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">
-          <span style="color: ${service.status === 'active' ? 'var(--success-color)' : 'var(--error-color)'};">
+    // 分页
+    const paginated = (window as any).paginateData(services, 'services');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((service: any) => `
+      <tr data-service-name="${service.name}">
+        <td>${service.name}</td>
+        <td>
+          <span style="color: ${service.status === 'active' ? 'var(--success-color)' : 'var(--error-color)'}">
             ${service.status}
           </span>
         </td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${service.enabled}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${service.description}">${service.description}</td>
+        <td>${service.enabled}</td>
+        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${service.description}">${service.description}</td>
       </tr>
     `).join('');
 
-    // 添加右键菜单事件监听器
-    tbody.querySelectorAll('tr[data-service-name]').forEach(row => {
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const serviceName = (row as HTMLElement).getAttribute('data-service-name');
-        if (serviceName) {
-          serviceContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, serviceName);
-        }
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('services', paginated.total);
+    }
   };
 
   // 更新用户表格
   (window as any).updateUsersTable = (users: any[]) => {
     const tbody = document.getElementById('users-table-body');
+    const paginationContainer = document.getElementById('users-pagination');
     if (!tbody) return;
 
     if (!users || users.length === 0) {
@@ -3513,6 +3523,7 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
@@ -3526,41 +3537,30 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
       shellFilter.value = currentValue; // 保持当前选择
     }
 
-    tbody.innerHTML = users.map((user) => `
-      <tr data-username="${user.username}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${user.username}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${user.uid}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${user.gid}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${user.home}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary);">${user.shell}</td>
+    // 分页
+    const paginated = (window as any).paginateData(users, 'users');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((user: any) => `
+      <tr data-username="${user.username}">
+        <td>${user.username}</td>
+        <td>${user.uid}</td>
+        <td>${user.gid}</td>
+        <td>${user.home}</td>
+        <td>${user.shell}</td>
       </tr>
     `).join('');
 
-    // 添加右键菜单事件监听器
-    tbody.querySelectorAll('tr[data-username]').forEach(row => {
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const username = (row as HTMLElement).getAttribute('data-username');
-        if (username) {
-          userContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, username);
-        }
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('users', paginated.total);
+    }
   };
 
   // 更新自启动表格
   (window as any).updateAutostartTable = (autostart: any[]) => {
     const tbody = document.getElementById('autostart-table-body');
+    const paginationContainer = document.getElementById('autostart-pagination');
     if (!tbody) return;
 
     if (!autostart || autostart.length === 0) {
@@ -3571,56 +3571,37 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = autostart.map((item) => `
-      <tr data-startup-name="${item.name}" data-startup-type="${item.type}" data-startup-path="${item.path || ''}" data-startup-command="${item.command}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${item.name}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid var(--border-color-light);" title="${item.command}">${item.command}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">
-          <span style="color: ${item.status === 'enabled' ? 'var(--success-color)' : 'var(--error-color)'};">
+    // 分页
+    const paginated = (window as any).paginateData(autostart, 'autostart');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((item: any) => `
+      <tr data-startup-name="${item.name}" data-startup-type="${item.type}" data-startup-path="${item.path || ''}" data-startup-command="${item.command}">
+        <td>${item.name}</td>
+        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${item.command}">${item.command}</td>
+        <td>
+          <span style="color: ${item.status === 'enabled' ? 'var(--success-color)' : 'var(--error-color)'}">
             ${item.status}
           </span>
         </td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary);">${item.type}</td>
+        <td>${item.type}</td>
       </tr>
     `).join('');
 
-    // 添加右键菜单事件监听器
-    tbody.querySelectorAll('tr[data-startup-name]').forEach(row => {
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const name = (row as HTMLElement).getAttribute('data-startup-name') || '';
-        const type = (row as HTMLElement).getAttribute('data-startup-type') || '';
-        const path = (row as HTMLElement).getAttribute('data-startup-path') || '';
-        const command = (row as HTMLElement).getAttribute('data-startup-command') || '';
-
-        if (name) {
-          startupContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, {
-            name,
-            type,
-            path,
-            command
-          });
-        }
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('autostart', paginated.total);
+    }
   };
 
   // 更新计划任务表格
   (window as any).updateCronTable = (cronJobs: any[]) => {
     const tbody = document.getElementById('cron-table-body');
+    const paginationContainer = document.getElementById('cron-pagination');
     if (!tbody) return;
 
     if (!cronJobs || cronJobs.length === 0) {
@@ -3631,51 +3612,32 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = cronJobs.map((job) => `
-      <tr data-cron-user="${job.user}" data-cron-schedule="${job.schedule}" data-cron-command="${job.command}" data-cron-source="${job.source || ''}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${job.user}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); font-family: monospace; border-right: 1px solid var(--border-color-light);">${job.schedule}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${job.command}">${job.command}</td>
+    // 分页
+    const paginated = (window as any).paginateData(cronJobs, 'cron');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((job: any) => `
+      <tr data-cron-user="${job.user}" data-cron-schedule="${job.schedule}" data-cron-command="${job.command}" data-cron-source="${job.source || ''}">
+        <td>${job.user}</td>
+        <td style="font-family: monospace;">${job.schedule}</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${job.command}">${job.command}</td>
       </tr>
     `).join('');
 
-    // 添加右键菜单事件监听器
-    tbody.querySelectorAll('tr[data-cron-user]').forEach(row => {
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const user = (row as HTMLElement).getAttribute('data-cron-user') || '';
-        const schedule = (row as HTMLElement).getAttribute('data-cron-schedule') || '';
-        const command = (row as HTMLElement).getAttribute('data-cron-command') || '';
-        const source = (row as HTMLElement).getAttribute('data-cron-source') || '';
-
-        if (user && command) {
-          cronContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, {
-            user,
-            schedule,
-            command,
-            source
-          });
-        }
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('cron', paginated.total);
+    }
   };
 
   // 更新防火墙表格
   (window as any).updateFirewallTable = (firewallRules: any[]) => {
     const tbody = document.getElementById('firewall-table-body');
+    const paginationContainer = document.getElementById('firewall-pagination');
     if (!tbody) return;
 
     if (!firewallRules || firewallRules.length === 0) {
@@ -3686,53 +3648,29 @@ function setupGlobalModalFunctions(app: LovelyResApp) {
           </td>
         </tr>
       `;
+      if (paginationContainer) paginationContainer.innerHTML = '';
       return;
     }
 
-    tbody.innerHTML = firewallRules.map((rule) => `
-      <tr data-chain="${rule.chain}" data-target="${rule.target}" data-protocol="${rule.protocol}" data-source="${rule.source}" data-destination="${rule.destination}" data-options="${rule.options}" style="
-        border-bottom: 1px solid var(--border-color);
-        cursor: context-menu;
-      ">
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${rule.chain}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${rule.target}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${rule.protocol}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${rule.source}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); border-right: 1px solid var(--border-color-light);">${rule.destination}</td>
-        <td style="padding: var(--spacing-sm); font-size: 12px; color: var(--text-primary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${rule.options}">${rule.options}</td>
+    // 分页
+    const paginated = (window as any).paginateData(firewallRules, 'firewall');
+    const displayData = paginated.data;
+
+    tbody.innerHTML = displayData.map((rule: any) => `
+      <tr data-chain="${rule.chain}" data-target="${rule.target}" data-protocol="${rule.protocol}" data-source="${rule.source}" data-destination="${rule.destination}" data-options="${rule.options}">
+        <td>${rule.chain}</td>
+        <td>${rule.target}</td>
+        <td>${rule.protocol}</td>
+        <td>${rule.source}</td>
+        <td>${rule.destination}</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${rule.options}">${rule.options}</td>
       </tr>
     `).join('');
 
-    // 添加右键菜单事件监听器
-    tbody.querySelectorAll('tr[data-chain]').forEach(row => {
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const mouseEvent = e as MouseEvent;
-
-        // 清除其他行的选中状态
-        tbody.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
-        // 选中当前行
-        (row as HTMLElement).classList.add('selected');
-
-        const chain = (row as HTMLElement).getAttribute('data-chain') || '';
-        const target = (row as HTMLElement).getAttribute('data-target') || '';
-        const protocol = (row as HTMLElement).getAttribute('data-protocol') || '';
-        const source = (row as HTMLElement).getAttribute('data-source') || '';
-        const destination = (row as HTMLElement).getAttribute('data-destination') || '';
-        const options = (row as HTMLElement).getAttribute('data-options') || '';
-
-        if (chain) {
-          firewallContextMenu.showContextMenu(mouseEvent.clientX, mouseEvent.clientY, {
-            chain,
-            target,
-            protocol,
-            source,
-            destination,
-            options
-          });
-        }
-      });
-    });
+    // 渲染分页控件
+    if (paginationContainer) {
+      paginationContainer.innerHTML = (window as any).renderPaginationControls('firewall', paginated.total);
+    }
   };
 
   // 仪表盘自动刷新相关函数
@@ -3821,20 +3759,23 @@ let remoteOperationsPageInitialized = false;
 
   // 检查统一SSH连接管理器的连接状态
   console.log(' 🔍 检查SSH连接状态...');
-  const backendStatus = await sshConnectionManager.checkConnectionStatus();
+  const backendStatus = await sshConnectionManager.checkConnectionStatus(false);
   console.log('🔍 后端返回的连接状态:', backendStatus);
 
-  // 获取连接状态
+  // 获取本地连接状态（仅用于展示）
   const connectionStatus = sshConnectionManager.getConnectionStatus();
   console.log('🔍 当前SSH连接状态:', connectionStatus);
 
-  if (connectionStatus?.connected) {
-    console.log('✅ 发现现有SSH连接，刷新远程操作界面');
-
-    // 刷新SFTP文件列表（会通过监听器自动更新UI）
-    await sftpManager.refreshFileList();
-
-    console.log('✅ SFTP文件列表已刷新');
+  // 逻辑判断以“后端实时状态”为准，避免本地缓存导致误判
+  if (backendStatus?.connected) {
+    console.log('✅ 发现现有SSH连接，自动加载SFTP目录');
+    const sftpFileList = document.getElementById('sftp-file-list');
+    if (sftpFileList) {
+      sftpFileList.innerHTML = sftpManager.renderFileListHTML();
+    }
+    sftpManager.refreshFileList().catch((err: unknown) => {
+      console.warn('自动加载SFTP目录失败:', err);
+    });
   } else {
     console.log('ℹ️ SSH未连接，显示提示信息');
 
@@ -3866,6 +3807,12 @@ let remoteOperationsPageInitialized = false;
       if (modifiedDesc) modifiedDesc.textContent = '修改时间 ↓';
     } catch { }
   }, 0);
+
+  // 首次进入页面时同步当前路径，避免输入框只显示占位符造成“未加载/异常”误解
+  const initPathInput = document.getElementById('sftp-path-input') as HTMLInputElement;
+  if (initPathInput) {
+    initPathInput.value = sftpManager.getCurrentPath();
+  }
 
   // 添加 SFTP 路径变化监听器
   sftpManager.addListener(([_files, path]) => {
@@ -4089,12 +4036,13 @@ async function loadLogFileList() {
     // 获取当前配置
     const state = (window as any).logAnalysisState || {};
     const useJournalctl = state.useJournalctl || false;
-    const logPath = state.logPath || '/var/log/auth.log';
+    const logPath = state.logPath || '/var/log/tuned/tuned.log';
     const pageSize = parseInt(state.lines || '100');
     const page = state.page || 1;
     const filter = state.filter || '';
     const journalUnit = state.journalUnit || '';
     const dateFilter = state.date || '';
+    const levelFilter = state.levelFilter || '';
 
     let result: any;
     
@@ -4106,7 +4054,8 @@ async function loadLogFileList() {
         unit: journalUnit || null,
         filter: filter || null,
         since: dateFilter ? `${dateFilter} 00:00:00` : null,
-        until: dateFilter ? `${dateFilter} 23:59:59` : null
+        until: dateFilter ? `${dateFilter} 23:59:59` : null,
+        levelFilter: levelFilter || null
       });
       document.getElementById('current-source')!.textContent = `journalctl${journalUnit ? ` -u ${journalUnit}` : ''}`;
     } else {
@@ -4116,7 +4065,8 @@ async function loadLogFileList() {
         page,
         pageSize,
         filter: filter || null,
-        dateFilter: dateFilter || null
+        dateFilter: dateFilter || null,
+        levelFilter: levelFilter || null
       });
       const fileName = logPath.split('/').pop() || logPath;
       document.getElementById('current-source')!.textContent = fileName;
@@ -4131,13 +4081,32 @@ async function loadLogFileList() {
     const pageDisplay = document.querySelector('.page-display');
     
     if (prevBtn) prevBtn.disabled = page <= 1;
-    if (nextBtn) nextBtn.disabled = result.entries.length < pageSize; // 如果返回条数少于pageSize，说明是最后一页
+    // 使用过滤后的总条目数判断是否有下一页
+    const totalCount = result.total_count || 0;
+    const hasNextPage = page * pageSize < totalCount;
+    if (nextBtn) nextBtn.disabled = !hasNextPage;
     if (pageDisplay) pageDisplay.textContent = `第 ${page} 页`;
+    console.log(`[日志分页] page=${page}, pageSize=${pageSize}, totalCount=${totalCount}, hasNextPage=${hasNextPage}`);
 
     // 渲染日志条目
     if (result.entries && result.entries.length > 0) {
       (window as any).loadedLogEntries = result.entries;
       logContainer.innerHTML = renderLogEntries(result.entries);
+      if ((window as any).logMultiSelectState) {
+        getLogMultiSelectState().selectedIndices.clear();
+        getLogMultiSelectState().lastClickedIndex = -1;
+        (window as any).updateBatchActionBar();
+      }
+      // 阻止多选模式下的默认文本选择行为（只绑定一次）
+      if (!logContainer.dataset.mouseDownBound) {
+        logContainer.dataset.mouseDownBound = 'true';
+        logContainer.addEventListener('mousedown', (e: MouseEvent) => {
+          // 只要按住修饰键就阻止默认文本选择，不管多选模式是否已开启
+          if (e.shiftKey || e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+          }
+        });
+      }
     } else {
       (window as any).loadedLogEntries = [];
       logContainer.innerHTML = `
@@ -4171,19 +4140,17 @@ async function loadLogFileList() {
 function renderLogEntries(entries: any[]): string {
   return `
     <div class="log-entries">
-      ${entries.map(entry => {
+      ${entries.map((entry, index) => {
         const levelClass = getLevelClass(entry.level);
         const highlightClass = entry.highlighted ? 'highlighted' : '';
         
-        // 简化时间戳显示
         let displayTime = entry.timestamp || '-';
         if (displayTime.length > 19) displayTime = displayTime.substring(0, 19);
 
-        // 后端当前返回 line 字段，兼容 message/raw 字段
         const cleanMessage = String(entry.message ?? entry.line ?? entry.raw ?? '').trim();
 
         return `
-          <div class="log-entry ${levelClass} ${highlightClass}">
+          <div class="log-entry ${levelClass} ${highlightClass}" data-index="${index}" onclick="window.handleLogEntryClick(event, ${index})">
             <div class="log-timestamp" title="${entry.timestamp}">${displayTime}</div>
             <div class="log-level ${levelClass}">${entry.level}</div>
             <div class="log-message">${entry.highlighted ? '<span class="log-marker">!</span>' : ''}${escapeHtml(cleanMessage)}</div>
@@ -4237,7 +4204,7 @@ function renderLogEntries(entries: any[]): string {
   const state = (window as any).logAnalysisState || {};
   const source = state.useJournalctl
     ? `journalctl${state.journalUnit ? ` -u ${state.journalUnit}` : ''}`
-    : (state.logPath || '/var/log/auth.log');
+    : (state.logPath || '/var/log/tuned/tuned.log');
 
   const logText = lines.join('\n');
   panel.style.display = 'block';
@@ -4314,18 +4281,26 @@ function escapeHtml(text: string): string {
   // 重新渲染控制面板
   const app = (window as any).app;
   if (app) {
-    const workspaceContent = document.querySelector('.workspace-content');
-    if (workspaceContent) {
-      const renderer = app.getStateManager().getUIRenderer();
-      // 更新渲染器内部状态
-      renderer['logAnalysisRenderer'].setUseJournalctl(source === 'journalctl');
-      workspaceContent.innerHTML = renderer['renderLogAnalysisPage']();
-      
-      // 自动刷新日志
-      setTimeout(() => {
-        (window as any).refreshLogAnalysis();
-      }, 100);
+    const renderer = app.getStateManager().getUIRenderer();
+    renderer['logAnalysisRenderer'].setUseJournalctl(source === 'journalctl');
+    const msState = getLogMultiSelectState();
+    if (msState) {
+      renderer['logAnalysisRenderer'].setMultiSelectEnabled(msState.enabled);
     }
+    // 使用容器化刷新：仅更新日志审计页面容器
+    if (typeof renderer.refreshPageContainer === 'function') {
+      renderer.refreshPageContainer('log-analysis');
+    } else {
+      const workspaceContent = document.querySelector('.workspace-content');
+      if (workspaceContent) {
+        workspaceContent.innerHTML = renderer['renderLogAnalysisPage']();
+      }
+    }
+    
+    // 自动刷新日志
+    setTimeout(() => {
+      (window as any).refreshLogAnalysis();
+    }, 100);
   }
 };
 
@@ -4366,6 +4341,20 @@ function escapeHtml(text: string): string {
   (window as any).logAnalysisState = (window as any).logAnalysisState || {};
   (window as any).logAnalysisState.date = date;
   (window as any).logAnalysisState.page = 1;
+  (window as any).refreshLogAnalysis();
+};
+
+/**
+ * 更新日志级别筛选
+ */
+(window as any).updateLogLevelFilter = function (level: string) {
+  (window as any).logAnalysisState = (window as any).logAnalysisState || {};
+  (window as any).logAnalysisState.levelFilter = level;
+  (window as any).logAnalysisState.page = 1;
+  const app = (window as any).app;
+  if (app?.modernUIRenderer?.logAnalysisRenderer) {
+    app.modernUIRenderer.logAnalysisRenderer.setLevelFilter(level);
+  }
   (window as any).refreshLogAnalysis();
 };
 
@@ -4413,6 +4402,237 @@ function escapeHtml(text: string): string {
   (window as any).logAnalysisState.journalUnit = unit;
   (window as any).logAnalysisState.page = 1;
   (window as any).refreshLogAnalysis();
+};
+
+(window as any).logMultiSelectState = {
+  enabled: false,
+  selectedIndices: new Set<number>(),
+  lastClickedIndex: -1
+};
+
+function getLogMultiSelectState() {
+  return (window as any).logMultiSelectState as {
+    enabled: boolean;
+    selectedIndices: Set<number>;
+    lastClickedIndex: number;
+  };
+}
+
+(window as any).toggleLogMultiSelect = function () {
+  const state = getLogMultiSelectState();
+  state.enabled = !state.enabled;
+
+  const btn = document.getElementById('log-multi-select-btn');
+  if (btn) {
+    btn.classList.toggle('active', state.enabled);
+  }
+
+  const actionBar = document.getElementById('log-batch-action-bar');
+  if (actionBar) {
+    actionBar.style.display = state.enabled ? 'flex' : 'none';
+  }
+
+  const logEntries = document.querySelector('.log-entries');
+  if (logEntries) {
+    logEntries.classList.toggle('log-multi-select-active', state.enabled);
+  }
+
+  if (!state.enabled) {
+    (window as any).clearLogSelection();
+  } else {
+    // 进入多选模式时也清除之前的浏览器文本选区
+    const selection = window.getSelection();
+    if (selection) selection.removeAllRanges();
+  }
+
+  (window as any).updateBatchActionBar();
+};
+
+(window as any).handleLogEntryClick = function (event: MouseEvent, index: number) {
+  const state = getLogMultiSelectState();
+
+  if (!state.enabled && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+    state.enabled = true;
+    const btn = document.getElementById('log-multi-select-btn');
+    if (btn) btn.classList.add('active');
+    const actionBar = document.getElementById('log-batch-action-bar');
+    if (actionBar) actionBar.style.display = 'flex';
+    const logEntries = document.querySelector('.log-entries');
+    if (logEntries) logEntries.classList.add('log-multi-select-active');
+  }
+
+  if (!state.enabled) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (event.shiftKey && state.lastClickedIndex >= 0) {
+    const start = Math.min(state.lastClickedIndex, index);
+    const end = Math.max(state.lastClickedIndex, index);
+    state.selectedIndices.clear();
+    for (let i = start; i <= end; i++) {
+      state.selectedIndices.add(i);
+    }
+  } else if (event.ctrlKey || event.metaKey) {
+    if (state.selectedIndices.has(index)) {
+      state.selectedIndices.delete(index);
+    } else {
+      state.selectedIndices.add(index);
+    }
+  } else {
+    state.selectedIndices.clear();
+    state.selectedIndices.add(index);
+  }
+
+  state.lastClickedIndex = index;
+  (window as any).updateLogEntrySelectionUI();
+  (window as any).updateBatchActionBar();
+};
+
+(window as any).updateLogEntrySelectionUI = function () {
+  const state = getLogMultiSelectState();
+  const entries = document.querySelectorAll('.log-entry[data-index]');
+  entries.forEach((el) => {
+    const idx = parseInt((el as HTMLElement).dataset.index || '0', 10);
+    el.classList.toggle('selected', state.selectedIndices.has(idx));
+  });
+};
+
+(window as any).updateBatchActionBar = function () {
+  const state = getLogMultiSelectState();
+  const countEl = document.getElementById('batch-select-count');
+  const actionBar = document.getElementById('log-batch-action-bar');
+
+  if (actionBar) {
+    actionBar.style.display = state.enabled ? 'flex' : 'none';
+  }
+
+  if (countEl) {
+    countEl.textContent = `已选择 ${state.selectedIndices.size} 条`;
+  }
+};
+
+(window as any).selectAllLogEntries = function () {
+  const state = getLogMultiSelectState();
+  const loadedEntries = ((window as any).loadedLogEntries || []) as any[];
+  state.selectedIndices.clear();
+  for (let i = 0; i < loadedEntries.length; i++) {
+    state.selectedIndices.add(i);
+  }
+  (window as any).updateLogEntrySelectionUI();
+  (window as any).updateBatchActionBar();
+};
+
+(window as any).clearLogSelection = function () {
+  const state = getLogMultiSelectState();
+  state.selectedIndices.clear();
+  state.lastClickedIndex = -1;
+  (window as any).updateLogEntrySelectionUI();
+  (window as any).updateBatchActionBar();
+  // 清除浏览器文本选区，防止退出多选后仍有文本被选中
+  const selection = window.getSelection();
+  if (selection) selection.removeAllRanges();
+};
+
+(window as any).copySelectedLogEntries = function () {
+  const state = getLogMultiSelectState();
+  const loadedEntries = ((window as any).loadedLogEntries || []) as any[];
+  if (state.selectedIndices.size === 0) return;
+
+  const sortedIndices = Array.from(state.selectedIndices).sort((a: number, b: number) => a - b);
+  const lines = sortedIndices.map((idx: number) => {
+    const entry = loadedEntries[idx];
+    if (!entry) return '';
+    const ts = entry.timestamp || '-';
+    const level = entry.level || '-';
+    const msg = String(entry.message ?? entry.line ?? entry.raw ?? '').trim();
+    return `[${ts}] [${level}] ${msg}`;
+  }).filter(Boolean);
+
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const countEl = document.getElementById('batch-select-count');
+    if (countEl) {
+      const original = countEl.textContent;
+      countEl.textContent = `已复制 ${lines.length} 条`;
+      setTimeout(() => {
+        countEl.textContent = original || '';
+      }, 2000);
+    }
+  }).catch((err) => {
+    console.error('复制失败:', err);
+  });
+};
+
+(window as any).analyzeSelectedLogEntries = async function () {
+  const state = getLogMultiSelectState();
+  const loadedEntries = ((window as any).loadedLogEntries || []) as any[];
+  if (state.selectedIndices.size === 0) return;
+
+  const panel = document.getElementById('log-ai-explanation');
+  const content = document.getElementById('log-ai-content');
+  const analyzeBtn = document.getElementById('log-ai-analyze-btn') as HTMLButtonElement | null;
+  if (!panel || !content) return;
+
+  const sortedIndices = Array.from(state.selectedIndices).sort((a: number, b: number) => a - b);
+  const lines = sortedIndices.map((idx: number) => {
+    const entry = loadedEntries[idx];
+    if (!entry) return '';
+    return String(entry.message ?? entry.line ?? entry.raw ?? '').trim();
+  }).filter((s) => s.length > 0);
+
+  if (lines.length === 0) {
+    panel.style.display = 'block';
+    content.textContent = '选中的日志条目为空文本，无法分析。';
+    return;
+  }
+
+  const logState = (window as any).logAnalysisState || {};
+  const source = logState.useJournalctl
+    ? `journalctl${logState.journalUnit ? ` -u ${logState.journalUnit}` : ''}`
+    : (logState.logPath || '/var/log/tuned/tuned.log');
+
+  const logText = lines.join('\n');
+  panel.style.display = 'block';
+  content.style.display = 'block';
+  content.textContent = `AI 正在分析选中的 ${lines.length} 条日志，请稍候...`;
+
+  if (analyzeBtn) {
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = '分析中...';
+  }
+
+  try {
+    if (!aiService.isConfigured()) {
+      throw new Error('未检测到可用模型配置，请先在设置中的 AI 模型里完成配置。');
+    }
+
+    let finalText = '';
+    await aiService.analyzeLogStream(
+      logText,
+      source,
+      (chunk) => {
+        if (!finalText) {
+          content.textContent = '';
+        }
+        finalText += chunk;
+        content.textContent = finalText;
+      },
+      (completedText) => {
+        finalText = completedText;
+      }
+    );
+
+    content.textContent = finalText || '分析完成，但未返回内容。';
+  } catch (error: any) {
+    const msg = error?.message || String(error);
+    content.textContent = `AI 分析失败: ${msg}`;
+  } finally {
+    if (analyzeBtn) {
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = 'AI分析';
+    }
+  }
 };
 
 // 启动应用

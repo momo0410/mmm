@@ -21,6 +21,7 @@ export class DatabaseRenderer {
                 .database-container {
                     display: flex;
                     height: 100%;
+                    min-height: 0;
                     gap: var(--spacing-md);
                     padding: var(--spacing-md);
                     box-sizing: border-box;
@@ -36,6 +37,7 @@ export class DatabaseRenderer {
                 }
                 .database-content {
                     flex: 1;
+                    min-height: 0;
                     background: var(--bg-secondary);
                     border-radius: var(--border-radius);
                     border: 1px solid var(--border-color);

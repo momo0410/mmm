@@ -1,4 +1,4 @@
-// LovelyRes - 文件查看/编辑模态组件
+// SDIT - 文件查看/编辑模态组件
 // 支持语法高亮的文件查看和编辑功能
 
 import { invoke } from '../../shims/@tauri-apps/api/core';

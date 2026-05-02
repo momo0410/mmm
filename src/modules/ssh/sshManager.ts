@@ -76,14 +76,11 @@ export class SSHManager {
 
     // 连接成功后立即获取轻量系统摘要信息
     try {
-      console.log('📊 正在获取系统摘要信息（轻量模式）...');
       await this.systemInfoManager.fetchSystemSummary();
       
       // 启动自动更新
       this.systemInfoManager.startAutoUpdate(30000, false); 
-      console.log('✅ 系统信息自动更新已启动');
     } catch (error) {
-      console.warn('⚠️ 获取系统摘要信息失败，但SSH连接成功:', error);
     }
   }
 
@@ -147,6 +144,10 @@ export class SSHManager {
    * 用于连接成功后快速初始化，避免全量加载
    */
   async fetchSystemSummary(): Promise<SystemInfo> {
+    const status = await invoke('ssh_get_connection_status').catch(() => null) as any;
+    if (!status?.connected) {
+      throw new Error('没有活动的 SSH 连接');
+    }
     return this.systemInfoManager.fetchSystemSummary();
   }
 
@@ -161,6 +162,10 @@ export class SSHManager {
    * 按 tab 懒加载详细系统信息（仅获取指定 tab 的数据）
    */
   async fetchTabDetail(tabId: string, forceRefresh = false): Promise<any> {
+    const status = await invoke('ssh_get_connection_status').catch(() => null) as any;
+    if (!status?.connected) {
+      throw new Error('没有活动的 SSH 连接');
+    }
     return this.systemInfoManager.fetchTabDetail(tabId, forceRefresh);
   }
 
@@ -197,7 +202,6 @@ export class SSHManager {
 
     try {
       const result = await invoke('ssh_execute_command', { command });
-      console.log(`✅ 命令执行成功: ${command}`);
       return result as string;
     } catch (error) {
       console.error(`❌ 命令执行失败: ${command}`, error);
@@ -245,7 +249,6 @@ export class SSHManager {
       id: generateId()
     }));
 
-    console.log('✅ 默认SSH命令已初始化');
   }
 
   /**
@@ -253,6 +256,5 @@ export class SSHManager {
    */
   destroy(): void {
     this.systemInfoManager.destroy();
-    console.log('✅ SSH管理器资源已清理');
   }
 }

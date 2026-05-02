@@ -45,8 +45,7 @@ export class RemoteOperationsManager {
       
       if (status?.connected) {
         console.log('🔗 发现现有SSH连接:', status);
-        // 刷新SFTP文件列表
-        await sftpManager.refreshFileList();
+        // 启动时不强制探测 SFTP，避免在禁用 SFTP 的服务器上触发连接抖动。
         // 更新终端状态
         terminalManager.updateTerminalDisplay();
       }
@@ -119,15 +118,11 @@ export class RemoteOperationsManager {
    */
   private async refreshRemoteOperations(): Promise<void> {
     try {
-      // 刷新SFTP文件列表
-      await sftpManager.refreshFileList();
-      
-      // 更新终端状态
       terminalManager.updateTerminalDisplay();
-      
-      // 更新UI显示
+
       this.updateSftpDisplay();
-      
+
+      await sftpManager.refreshFileList();
     } catch (error) {
       console.error('刷新远程操作失败:', error);
     }

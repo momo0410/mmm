@@ -5,9 +5,11 @@
 
 import type { StateManager } from '../core/stateManager';
 import type { AppState } from '../ui/pageTypes';
+import { ALL_PAGE_IDS } from '../ui/pageTypes';
 import { aiService } from '../ai/aiService';
 import { DashboardRenderer } from './dashboardRenderer';
 import { sftpManager } from '../remote/sftpManager';
+import { sshConnectionManager } from '../remote/sshConnectionManager';
 
 import { SftpContextMenuRenderer } from './sftpContextMenu';
 import { LogAnalysisRenderer } from './logAnalysisRenderer';
@@ -114,10 +116,12 @@ export class ModernUIRenderer {
   private stateManager: StateManager;
   private state: AppState;
   private dashboardRenderer: DashboardRenderer;
-  // @ts-ignore - reserved for future log analysis page rendering
-  private logAnalysisRenderer: LogAnalysisRenderer;
+  public logAnalysisRenderer: LogAnalysisRenderer;
   public sftpContextMenuRenderer: SftpContextMenuRenderer;
   public databaseRenderer: DatabaseRenderer;
+  private pageContainersRendered: boolean = false;
+  private currentVisiblePage: string = 'dashboard';
+  private pageInitialized: Set<string> = new Set();
 
   constructor(stateManager: StateManager) {
     this.stateManager = stateManager;
@@ -328,7 +332,7 @@ export class ModernUIRenderer {
         <div class="title-bar-left">
           <div class="app-logo">
             <div class="logo-icon" style="width: 30px; height: 30px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-              <img src="/logo-32.png" alt="LovelyRes Logo" style="width: 100%; height: 100%; object-fit: contain;" />
+              <img src="/logo-32.png" alt="SDIT Logo" style="width: 100%; height: 100%; object-fit: contain;" />
             </div>
             <div class="app-info">
               <div class="app-name">安御智测</div>
@@ -855,14 +859,261 @@ export class ModernUIRenderer {
    * 渲染主工作区
    */
   renderMainWorkspace(): string {
+    if (this.state.loading) {
+      this.pageContainersRendered = false;
+      this.pageInitialized.clear();
+      return `
+        <div class="main-workspace">
+          <div class="workspace-content page-transition" id="workspace-content">
+            ${this.renderLoadingState()}
+          </div>
+        </div>
+      `;
+    }
+
+    if (!this.state.isConnected) {
+      this.pageContainersRendered = false;
+      this.pageInitialized.clear();
+      return `
+        <div class="main-workspace">
+          <div class="workspace-content page-transition" id="workspace-content">
+            ${this.renderConnectionPrompt()}
+          </div>
+        </div>
+      `;
+    }
+
+    this.currentVisiblePage = this.state.currentPage;
+    this.pageContainersRendered = true;
+
+    const containers = ALL_PAGE_IDS.map(pageId => {
+      const display = pageId === this.state.currentPage ? 'block' : 'none';
+      return `<div class="page-container" id="page-${pageId}" style="display:${display}">
+        ${this.getPageHTML(pageId)}
+      </div>`;
+    }).join('');
+
     return `
       <div class="main-workspace">
-        <!-- 工作区内容 -->
-        <div class="workspace-content page-transition">
-          ${this.renderWorkspaceContent()}
+        <div class="workspace-content page-transition" id="workspace-content">
+          ${containers}
         </div>
       </div>
     `;
+  }
+
+  /**
+   * 激活当前页面（触发数据加载等初始化逻辑）
+   * 用于初始渲染后激活默认页面
+   */
+  activateCurrentPage(): void {
+    if (!this.pageContainersRendered) {
+      return;
+    }
+    const pageId = this.currentVisiblePage;
+    if (pageId) {
+      this.onPageActivated(pageId);
+    }
+  }
+
+  /**
+   * 切换页面（仅切换 display，不重建 DOM）
+   */
+  switchToPage(pageId: string): void {
+    if (!this.pageContainersRendered) {
+      return;
+    }
+
+    const prevPage = this.currentVisiblePage;
+    if (prevPage === pageId) {
+      return;
+    }
+
+    const prevContainer = document.getElementById(`page-${prevPage}`);
+    const nextContainer = document.getElementById(`page-${pageId}`);
+
+    if (prevContainer) {
+      prevContainer.style.display = 'none';
+      this.onPageDeactivated(prevPage);
+    }
+
+    if (nextContainer) {
+      nextContainer.style.display = 'block';
+      this.currentVisiblePage = pageId;
+      this.onPageActivated(pageId);
+    }
+  }
+
+  /**
+   * 刷新单个页面的容器内容（保留容器外层，只替换内部 HTML）
+   */
+  refreshPageContainer(pageId: string): void {
+    if (!this.pageContainersRendered) {
+      return;
+    }
+
+    const container = document.getElementById(`page-${pageId}`);
+    if (container) {
+      container.innerHTML = this.getPageHTML(pageId);
+    }
+  }
+
+  /**
+   * 页面激活钩子
+   */
+  private onPageActivated(pageId: string): void {
+    switch (pageId) {
+      case 'dashboard':
+        setTimeout(() => {
+          const app = (window as any).app;
+          if (app?.sshManager && !app.sshManager.getSystemInfo()) {
+            void (async () => {
+              try {
+                const liveStatus = await sshConnectionManager.checkConnectionStatus(false);
+                if (!liveStatus?.connected) {
+                  console.debug('跳过 dashboard 摘要加载：后端连接状态不可用');
+                  return;
+                }
+                await app.sshManager.fetchSystemSummary();
+                this.refreshPageContainer('dashboard');
+              } catch (error) {
+                console.warn('⚠️ 获取系统摘要失败:', error);
+              }
+            })();
+          }
+          const inst = (window as any).dashboardRendererInstance;
+          if (inst?.initCharts) {
+            inst.initCharts(false);
+          }
+          if (inst?.fitToViewport) {
+            inst.fitToViewport();
+          }
+          (window as any).startDashboardAutoRefresh?.();
+        }, 50);
+        break;
+      case 'system-info':
+        setTimeout(() => {
+          const cache = (window as any).systemInfoCache;
+          if (cache) {
+            cache.isLoading = false;
+          }
+          (window as any).loadSystemDetailedInfo?.(false);
+        }, 50);
+        break;
+      case 'remote-operations':
+        setTimeout(() => {
+          (window as any).initRemoteOperationsPage?.();
+        }, 50);
+        break;
+      case 'emergency-commands':
+        setTimeout(() => {
+          (window as any).emergencyPageManager?.initialize();
+        }, 50);
+        break;
+      case 'quick-detection':
+        setTimeout(() => {
+          (window as any).quickDetection?.refreshHistoryUI?.();
+        }, 50);
+        break;
+      case 'log-analysis':
+        setTimeout(() => {
+          (window as any).refreshLogAnalysis?.();
+        }, 200);
+        break;
+      case 'payloader':
+        setTimeout(() => {
+          const show = (window as any).showPayloader;
+          if (typeof show === 'function') {
+            show();
+          }
+        }, 50);
+        break;
+      case 'database':
+        break;
+    }
+  }
+
+  /**
+   * 页面失活钩子
+   */
+  private onPageDeactivated(pageId: string): void {
+    this.savePageUIState(pageId);
+
+    switch (pageId) {
+      case 'dashboard':
+        (window as any).stopDashboardAutoRefresh?.();
+        break;
+      case 'payloader':
+        setTimeout(() => {
+          const hide = (window as any).hidePayloader;
+          if (typeof hide === 'function') {
+            hide();
+          }
+        }, 0);
+        break;
+    }
+  }
+
+  private savePageUIState(pageId: string): void {
+    const container = document.getElementById(`page-${pageId}`);
+    if (!container) return;
+
+    const state: Record<string, any> = {};
+
+    const activeTab = container.querySelector('.tab-btn.active');
+    if (activeTab) {
+      state.activeTab = activeTab.getAttribute('data-tab') || '';
+    }
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"], .search-input, input.search-box');
+    if (searchInput) {
+      state.searchQuery = searchInput.value;
+    }
+
+    const filterSelect = container.querySelector<HTMLSelectElement>('select.filter-select, [id$="-filter"]');
+    if (filterSelect) {
+      state.filterValue = filterSelect.value;
+    }
+
+    const scrollContainer = container.querySelector('.page-content, .tab-content, .log-list, .table-container, .sftp-main-content');
+    if (scrollContainer) {
+      state.scrollTop = scrollContainer.scrollTop;
+    }
+
+    const sortSelect = container.querySelector<HTMLSelectElement>('#sftp-sort-mode, [id$="-sort"]');
+    if (sortSelect) {
+      state.sortMode = sortSelect.value;
+    }
+
+    this.stateManager.savePageState(pageId, state);
+  }
+
+  /**
+   * 获取指定页面的 HTML 内容
+   */
+  getPageHTML(pageId: string): string {
+    switch (pageId) {
+      case 'dashboard':
+        return this.renderDashboard();
+      case 'system-info':
+        return this.renderSystemInfo();
+      case 'ssh-terminal':
+        return this.renderSSHTerminalRedirect();
+      case 'remote-operations':
+        return this.renderRemoteOperationsPage();
+      case 'emergency-commands':
+        return this.renderEmergencyCommandsPage();
+      case 'quick-detection':
+        return this.renderQuickDetectionPage();
+      case 'database':
+        return this.databaseRenderer.render();
+      case 'log-analysis':
+        return this.logAnalysisRenderer.render();
+      case 'payloader':
+        return this.renderPayloaderPage();
+      default:
+        return this.renderDashboard();
+    }
   }
 
 
@@ -961,43 +1212,6 @@ export class ModernUIRenderer {
   }
 
 
-
-/**
- * 渲染工作区内容
- */
-private renderWorkspaceContent(): string {
-    if (this.state.loading) {
-      return this.renderLoadingState();
-    }
-
-    if (!this.state.isConnected) {
-      return this.renderConnectionPrompt();
-    }
-
-    // 根据当前页面渲染不同内容
-    switch (this.state.currentPage) {
-      case 'system-info':
-        return this.renderSystemInfo();
-      case 'ssh-terminal':
-        return this.renderSSHTerminalRedirect();
-      case 'remote-operations':
-        return this.renderRemoteOperationsPage();
-      case 'emergency-commands':
-        return this.renderEmergencyCommandsPage();
-      case 'quick-detection':
-        return this.renderQuickDetectionPage();
-      case 'database':
-        return this.databaseRenderer.render();
-      case 'log-analysis':
-        return this.logAnalysisRenderer.render();
-      case 'payloader':
-        return this.renderPayloaderPage();
-      case 'dashboard':
-      default:
-        return this.renderDashboard();
-    }
-}
-
   /**
    * 渲染系统信息页面
    */
@@ -1019,59 +1233,61 @@ private renderWorkspaceContent(): string {
 
     return `
       <div class="system-info-container">
-        <div class="system-info-header ${collapsedClass}">
-          <div class="header-toggle-btn" onclick="window.toggleSystemInfoHeader()" title="切换菜单">
-            <span class="header-toggle-icon">${toggleIcon}</span>
-          </div>
-          
-          <div class="system-info-menu-title">
-            <span>系统概览</span>
+        <div class="system-info-sidebar-wrapper">
+          <div class="system-info-header ${collapsedClass}">
+            <div class="system-info-menu-title">
+              <span>系统概览</span>
+            </div>
+
+            <div class="system-info-tabs">
+              <button class="tab-btn active" data-tab="processes">
+                <span class="tab-icon">${List({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">进程详情</span>
+                ${renderCountBadge('processes')}
+              </button>
+              <button class="tab-btn" data-tab="network">
+                <span class="tab-icon">${Earth({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">网络详情</span>
+                ${renderCountBadge('network')}
+              </button>
+              <button class="tab-btn" data-tab="services">
+                <span class="tab-icon">${System({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">系统服务</span>
+                ${renderCountBadge('services')}
+              </button>
+              <button class="tab-btn" data-tab="users">
+                <span class="tab-icon">${User({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">用户列表</span>
+                ${renderCountBadge('users')}
+              </button>
+              <button class="tab-btn" data-tab="autostart">
+                <span class="tab-icon">${Rocket({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">自启动</span>
+                ${renderCountBadge('autostart')}
+              </button>
+              <button class="tab-btn" data-tab="cron">
+                <span class="tab-icon">${Time({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">计划任务</span>
+                ${renderCountBadge('cron')}
+              </button>
+              <button class="tab-btn" data-tab="firewall">
+                <span class="tab-icon">${Shield({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
+                <span class="tab-label">防火墙</span>
+                ${renderCountBadge('firewall')}
+              </button>
+            </div>
           </div>
 
-          <div class="system-info-tabs">
-            <button class="tab-btn active" data-tab="processes">
-              <span class="tab-icon">${List({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">进程详情</span>
-              ${renderCountBadge('processes')}
-            </button>
-            <button class="tab-btn" data-tab="network">
-              <span class="tab-icon">${Earth({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">网络详情</span>
-              ${renderCountBadge('network')}
-            </button>
-            <button class="tab-btn" data-tab="services">
-              <span class="tab-icon">${System({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">系统服务</span>
-              ${renderCountBadge('services')}
-            </button>
-            <button class="tab-btn" data-tab="users">
-              <span class="tab-icon">${User({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">用户列表</span>
-              ${renderCountBadge('users')}
-            </button>
-            <button class="tab-btn" data-tab="autostart">
-              <span class="tab-icon">${Rocket({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">自启动</span>
-              ${renderCountBadge('autostart')}
-            </button>
-            <button class="tab-btn" data-tab="cron">
-              <span class="tab-icon">${Time({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">计划任务</span>
-              ${renderCountBadge('cron')}
-            </button>
-            <button class="tab-btn" data-tab="firewall">
-              <span class="tab-icon">${Shield({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-              <span class="tab-label">防火墙</span>
-              ${renderCountBadge('firewall')}
-            </button>
-          </div>
-          
-          <div class="system-info-actions">
+          <div class="system-info-actions-bottom">
             <button class="refresh-btn" onclick="window.refreshAllSystemInfo()" title="刷新所有系统信息">
               ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
               <span>刷新数据</span>
             </button>
           </div>
+        </div>
+
+        <div class="header-toggle-btn" onclick="window.toggleSystemInfoHeader()" title="切换菜单">
+          <span class="header-toggle-icon">${toggleIcon}</span>
         </div>
 
         <div class="system-info-content ${contentExpandedClass}" id="system-info-content">
@@ -1217,6 +1433,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="processes-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1241,7 +1458,7 @@ private renderWorkspaceContent(): string {
             >
               <option value="">所有状态</option>
               <option value="LISTEN">LISTEN</option>
-              <option value="ESTABLISHED">ESTABLISHED</option>
+              <option value="ESTAB">ESTAB</option>
               <option value="TIME_WAIT">TIME_WAIT</option>
               <option value="CLOSE_WAIT">CLOSE_WAIT</option>
               <option value="SYN_SENT">SYN_SENT</option>
@@ -1285,6 +1502,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="network-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1347,6 +1565,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="services-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1411,6 +1630,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="users-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1460,6 +1680,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="autostart-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1508,6 +1729,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="cron-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -1570,6 +1792,7 @@ private renderWorkspaceContent(): string {
             </tbody>
           </table>
         </div>
+        <div id="firewall-pagination" class="table-pagination-container"></div>
       </div>
     `;
   }
@@ -2338,7 +2561,7 @@ private renderWorkspaceContent(): string {
         <div class="connection-prompt-bg"></div>
         <div class="connection-prompt-card glass-effect hover-lift">
           <div class="prompt-badge">
-            <img src="/logo.png" alt="LovelyRes Logo" style="width: 100%; height: 100%; object-fit: contain;" />
+            <img src="/logo.png" alt="SDIT Logo" style="width: 100%; height: 100%; object-fit: contain;" />
           </div>
           
           <div class="prompt-header-content">
@@ -2557,11 +2780,11 @@ private renderWorkspaceContent(): string {
     const body = emergencyCategories.map(renderCategory).join('');
 
     return `
-      <div class="emergency-commands-page" style="display:flex; flex-direction:column; gap: var(--spacing-lg);">
+      <div class="emergency-commands-page" style="display:flex; flex-direction:column; gap: var(--spacing-lg); min-height: 100%;">
         <div class="em-header-container">
           <div class="em-system-card">
             <div class="em-system-icon">
-              <img src="/icons/command-system.png" alt="检测到的系统" />
+              <img src="/icons/command-execute.png" alt="检测到的系统" />
             </div>
             <div class="em-system-info">
               <div class="em-system-label">检测到的系统</div>
@@ -2729,6 +2952,7 @@ private renderWorkspaceContent(): string {
         max-width: 1200px;
         margin: 0 auto;
         padding: var(--spacing-lg) var(--spacing-md);
+        min-height: 100%;
       ">
         <!-- 顶部 Header -->
         <div style="

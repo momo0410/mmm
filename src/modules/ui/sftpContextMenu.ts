@@ -42,11 +42,11 @@ export class SftpContextMenuRenderer {
 
               <!-- 三级菜单 -->
               <div class="ctx-submenu ctx-submenu-level3">
-                <div class="ctx-item" data-action="file-hash">
+                <div class="ctx-item" data-action="hash">
                   ${IconPark.Fingerprint({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>文件哈希值</span>
                 </div>
-                <div class="ctx-item" data-action="file-signature">
+                <div class="ctx-item" data-action="signature">
                   ${IconPark.FileCode({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>文件类型识别</span>
                 </div>
@@ -54,11 +54,11 @@ export class SftpContextMenuRenderer {
                   ${IconPark.FileText({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>文件大小详情</span>
                 </div>
-                <div class="ctx-item" data-action="file-permissions">
+                <div class="ctx-item" data-action="permissions">
                   ${IconPark.Permissions({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>权限分析</span>
                 </div>
-                <div class="ctx-item" data-action="file-timestamps">
+                <div class="ctx-item" data-action="timestamps">
                   ${IconPark.Time({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>时间戳分析</span>
                 </div>
@@ -98,7 +98,7 @@ export class SftpContextMenuRenderer {
               </div>
             </div>
 
-            <!-- 内容分析 (三级菜单) -->
+<!-- 内容分析 (三级菜单) -->
             <div class="ctx-item ctx-parent">
               <div style="display: flex; align-items: center; gap: 8px;">
                 ${IconPark.FileText({ theme: 'outline', size: '14', fill: 'currentColor' })}
@@ -108,7 +108,7 @@ export class SftpContextMenuRenderer {
 
               <!-- 三级菜单 -->
               <div class="ctx-submenu ctx-submenu-level3">
-                <div class="ctx-item" data-action="file-strings">
+                <div class="ctx-item" data-action="strings">
                   ${IconPark.FileText({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>字符串提取</span>
                 </div>
@@ -141,7 +141,7 @@ export class SftpContextMenuRenderer {
 
               <!-- 三级菜单 -->
               <div class="ctx-submenu ctx-submenu-level3">
-                <div class="ctx-item" data-action="file-processes">
+                <div class="ctx-item" data-action="processes">
                   ${IconPark.LinkOne({ theme: 'outline', size: '14', fill: 'currentColor' })}
                   <span>关联进程</span>
                 </div>
@@ -210,34 +210,6 @@ export class SftpContextMenuRenderer {
               </div>
             </div>
 
-            <!-- 恶意软件检测 (三级菜单 + VIP) -->
-            <div class="ctx-item ctx-parent">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                ${IconPark.Bug({ theme: 'outline', size: '14', fill: 'currentColor' })}
-                <span>恶意软件检测 🔒</span>
-              </div>
-              <span style="font-size: 10px; color: var(--text-secondary);">▶</span>
-
-              <!-- 三级菜单 -->
-              <div class="ctx-submenu ctx-submenu-level3">
-                <div class="ctx-item" data-action="webshell-detection">
-                  ${IconPark.Bug({ theme: 'outline', size: '14', fill: 'currentColor' })}
-                  <span>Webshell检测</span>
-                </div>
-                <div class="ctx-item" data-action="backdoor-detection">
-                  ${IconPark.Ghost({ theme: 'outline', size: '14', fill: 'currentColor' })}
-                  <span>后门检测</span>
-                </div>
-                <div class="ctx-item" data-action="crypto-mining-detection">
-                  ${IconPark.Bitcoin({ theme: 'outline', size: '14', fill: 'currentColor' })}
-                  <span>挖矿程序检测</span>
-                </div>
-                <div class="ctx-item" data-action="reverse-shell-detection">
-                  ${IconPark.Terminal({ theme: 'outline', size: '14', fill: 'currentColor' })}
-                  <span>反弹Shell检测</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 

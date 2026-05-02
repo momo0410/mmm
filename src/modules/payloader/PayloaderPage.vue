@@ -115,14 +115,14 @@
           class="payloader-btn payloader-btn--pentest"
           @click="openPentestModal"
           :disabled="agentRunning"
-          title="一键渗透"
+          title="智能分析"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
             <path d="M2 17l10 5 10-5"></path>
             <path d="M2 12l10 5 10-5"></path>
           </svg>
-          一键渗透
+          智能分析
         </button>
         <button 
           v-if="state.viewMode === 'list'"
@@ -145,7 +145,7 @@
       <div v-if="showPentestModal" class="payloader-modal-overlay" @click.self="closePentestModal">
         <div class="payloader-modal">
           <div class="payloader-modal-header">
-            <h3>一键渗透检测</h3>
+            <h3>智能分析</h3>
             <button class="payloader-modal-close" @click="closePentestModal">&times;</button>
           </div>
           <div class="payloader-modal-body">
@@ -164,29 +164,26 @@
               />
               <p class="payloader-modal-helper">仅用于你已授权的目标资产。支持输入 IP 地址或域名。</p>
             </div>
-            <div v-if="pentestModalError" class="payloader-modal-error">{{ pentestModalError }}</div>
-            <div class="payloader-agent-phases-overview">
-              <div class="payloader-agent-phase-item">
-                <span class="payloader-agent-phase-num">1</span>
-                <span class="payloader-agent-phase-label">侦察与信息收集</span>
-              </div>
-              <div class="payloader-agent-phase-item">
-                <span class="payloader-agent-phase-num">2</span>
-                <span class="payloader-agent-phase-label">漏洞发现与分析</span>
-              </div>
-              <div class="payloader-agent-phase-item">
-                <span class="payloader-agent-phase-num">3</span>
-                <span class="payloader-agent-phase-label">漏洞利用与权限提升</span>
-              </div>
-              <div class="payloader-agent-phase-item">
-                <span class="payloader-agent-phase-num">4</span>
-                <span class="payloader-agent-phase-label">证据收集与风险验证</span>
-              </div>
-              <div class="payloader-agent-phase-item">
-                <span class="payloader-agent-phase-num">5</span>
-                <span class="payloader-agent-phase-label">报告与修复验证</span>
+            <div class="payloader-modal-input-group payloader-modal-input-group--mode">
+              <label class="payloader-modal-label">执行模式</label>
+              <div class="payloader-mode-toggle" role="radiogroup" aria-label="渗透任务执行模式">
+                <button
+                  type="button"
+                  :class="['payloader-mode-toggle-btn', { active: pentestExecutionMode === 'serial' }]"
+                  @click="setPentestExecutionMode('serial')"
+                >
+                  串行
+                </button>
+                <button
+                  type="button"
+                  :class="['payloader-mode-toggle-btn', { active: pentestExecutionMode === 'parallel' }]"
+                  @click="setPentestExecutionMode('parallel')"
+                >
+                  并行
+                </button>
               </div>
             </div>
+            <div v-if="pentestModalError" class="payloader-modal-error">{{ pentestModalError }}</div>
           </div>
           <div class="payloader-modal-footer">
             <button class="payloader-btn payloader-btn--secondary" @click="closePentestModal">取消</button>
@@ -202,7 +199,7 @@
       </div>
 
       <!-- Agent 结果弹窗 -->
-      <div v-if="showResultModal" class="payloader-modal-overlay" @click.self="!agentRunning && (showResultModal = false)">
+      <div v-if="showResultModal" class="payloader-modal-overlay" @click.self="requestCloseResultModal">
         <div class="payloader-modal payloader-modal--result">
           <div class="payloader-modal-header">
             <h3>渗透结果分析</h3>
@@ -217,15 +214,23 @@
                 </svg>
                 日志
               </button>
-              <button v-if="!agentRunning" class="payloader-modal-close" @click="showResultModal = false">&times;</button>
+              <button class="payloader-modal-close" title="关闭" @click="requestCloseResultModal">&times;</button>
             </div>
           </div>
           <div class="payloader-modal-body payloader-modal-body--scroll">
             <!-- 运行中 -->
             <div v-if="agentRunning" class="payloader-agent-running">
-              <div class="payloader-agent-running-spinner"></div>
-              <p class="payloader-agent-running-text">正在对 {{ pentestTarget || '目标资产' }} 执行一键渗透检测...</p>
-              <p class="payloader-agent-running-sub">5 阶段自动化验证链</p>
+              <div class="payloader-agent-running-header">
+                <div class="payloader-agent-running-spinner"></div>
+                <div class="payloader-agent-running-header-text">
+                  <p class="payloader-agent-running-text">正在对 {{ pentestTarget || '目标资产' }} 执行智能分析...</p>
+                  <p class="payloader-agent-running-sub">
+                    <span class="payloader-agent-phase-badge">{{ getPhaseLabel(agentResult?.phase) }}</span>
+                    <span v-if="agentResult?.actions_count" class="payloader-agent-round-info">第 {{ agentResult.actions_count }} 步</span>
+                    <span class="payloader-agent-pulse"></span>
+                  </p>
+                </div>
+              </div>
               <div v-if="agentResult" class="payloader-agent-live-panel">
                 <div class="payloader-agent-live-stats">
                   <div class="payloader-agent-live-stat">
@@ -245,24 +250,31 @@
                     <span class="payloader-agent-live-value">{{ agentResult.vuln_count || 0 }} 项</span>
                   </div>
                 </div>
-                <div class="payloader-agent-live-log">
+                <div v-if="currentActionSummary" class="payloader-agent-current-action">
+                  <span class="payloader-agent-current-action-dot"></span>
+                  <span class="payloader-agent-current-action-text">{{ currentActionSummary }}</span>
+                  <span v-if="currentActionElapsed" class="payloader-agent-current-action-elapsed">{{ currentActionElapsed }}</span>
+                </div>
+                <div class="payloader-agent-live-log payloader-agent-live-log--compact">
                   <div class="payloader-agent-live-log-header">
-                    <h4>AI 最近执行记录</h4>
-                    <span>{{ (agentResult.actions || []).length }} 条</span>
+                    <h4>执行摘要</h4>
+                    <span>{{ compactActionItems.length }} / {{ (agentResult.actions || []).length }} 条</span>
                   </div>
-                  <div v-if="agentResult.actions && agentResult.actions.length > 0" class="payloader-agent-action-list">
-                    <div v-for="(action, idx) in agentResult.actions" :key="`${action.time}-${idx}`" class="payloader-agent-action-item">
-                      <div class="payloader-agent-action-top">
-                        <span class="payloader-agent-action-tool">{{ action.tool }}</span>
+                  <div class="payloader-agent-log-hint">详细参数和完整输出请点击右上角“日志”查看。</div>
+                  <div v-if="compactActionItems.length > 0" class="payloader-agent-compact-list">
+                    <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item" :class="{ 'payloader-agent-action-running': action.status === 'running' }">
+                      <div class="payloader-agent-compact-top">
+                        <span class="payloader-agent-action-tool" :class="{ 'payloader-agent-action-tool-active': action.status === 'running' }">{{ action.tool }}</span>
                         <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
+                        <span v-if="action.status === 'running'" class="payloader-agent-action-status-running">执行中</span>
                       </div>
-                      <div class="payloader-agent-action-block">
+                      <div class="payloader-agent-compact-line">
                         <span class="payloader-agent-action-label">参数</span>
-                        <pre class="payloader-agent-action-args">{{ formatActionPayload(action.args, '无参数') }}</pre>
+                        <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.args, '无参数') }}</span>
                       </div>
-                      <div class="payloader-agent-action-block">
+                      <div class="payloader-agent-compact-line">
                         <span class="payloader-agent-action-label">输出</span>
-                        <pre class="payloader-agent-action-result">{{ formatActionPayload(action.result, '暂无输出') }}</pre>
+                        <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.result, action.status === 'running' ? '等待输出...' : '暂无输出') }}</span>
                       </div>
                     </div>
                   </div>
@@ -302,21 +314,22 @@
                     <path d="M9 11l3 3L22 4"></path>
                     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                   </svg>
-                  AI 执行记录
+                  AI 执行摘要
                 </h4>
-                <div class="payloader-agent-action-list">
-                  <div v-for="(action, idx) in agentResult.actions" :key="`${action.time}-${idx}`" class="payloader-agent-action-item">
-                    <div class="payloader-agent-action-top">
+                <div class="payloader-agent-log-hint">页面仅展示最近摘要，完整执行过程、参数和输出请查看右上角“日志”。</div>
+                <div class="payloader-agent-compact-list">
+                  <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item">
+                    <div class="payloader-agent-compact-top">
                       <span class="payloader-agent-action-tool">{{ action.tool }}</span>
                       <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
                     </div>
-                    <div class="payloader-agent-action-block">
+                    <div class="payloader-agent-compact-line">
                       <span class="payloader-agent-action-label">参数</span>
-                      <pre class="payloader-agent-action-args">{{ formatActionPayload(action.args, '无参数') }}</pre>
+                      <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.args, '无参数') }}</span>
                     </div>
-                    <div class="payloader-agent-action-block">
+                    <div class="payloader-agent-compact-line">
                       <span class="payloader-agent-action-label">输出</span>
-                      <pre class="payloader-agent-action-result">{{ formatActionPayload(action.result, '暂无输出') }}</pre>
+                      <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.result, '暂无输出') }}</span>
                     </div>
                   </div>
                 </div>
@@ -483,6 +496,21 @@
                 </div>
               </div>
 
+              <!-- 检测报告 -->
+              <div v-if="agentResult.final?.report" class="payloader-agent-section payloader-agent-report-section">
+                <h4 class="payloader-agent-section-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                  </svg>
+                  完整检测报告
+                </h4>
+                <div class="payloader-agent-report-content" v-html="renderReportMarkdown(agentResult.final.report)"></div>
+              </div>
+
               <!-- 使用的 Skills -->
               <div v-if="agentResult.skill_results && agentResult.skill_results.length > 0" class="payloader-agent-section payloader-agent-skills-section">
                 <h4 class="payloader-agent-section-title">
@@ -504,18 +532,38 @@
             </div>
           </div>
           <div v-if="!agentRunning" class="payloader-modal-footer">
-            <button class="payloader-btn payloader-btn--secondary" @click="showResultModal = false">关闭</button>
-            <button class="payloader-btn payloader-btn--primary" @click="showResultModal = false; startHostAgent()">重新检测</button>
+            <button class="payloader-btn payloader-btn--secondary" @click="requestCloseResultModal">关闭</button>
+            <button class="payloader-btn payloader-btn--primary" @click="closeResultModal(); startHostAgent()">重新检测</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showCloseConfirmModal" class="payloader-modal-overlay" @click.self="cancelCloseConfirmation">
+        <div class="payloader-modal payloader-modal--confirm">
+          <div class="payloader-modal-header">
+            <h3>确认关闭</h3>
+            <button class="payloader-modal-close" title="关闭" @click="cancelCloseConfirmation">&times;</button>
+          </div>
+          <div class="payloader-modal-body">
+            <p class="payloader-modal-desc">
+              当前任务仍在运行。你可以关闭当前弹窗并让任务在后台继续，或者立即中断本次任务。
+            </p>
+          </div>
+          <div class="payloader-modal-footer">
+            <button class="payloader-btn payloader-btn--secondary" @click="continueTaskInBackground">后台继续运行</button>
+            <button class="payloader-btn payloader-btn--danger" :disabled="stoppingTask" @click="interruptTaskAndClose">
+              {{ stoppingTask ? '中断中...' : '中断任务' }}
+            </button>
           </div>
         </div>
       </div>
 
       <!-- 日志弹窗 -->
       <div v-if="showLogModal" class="payloader-modal-overlay payloader-log-overlay" @click.self="closeLogModal">
-        <div class="payloader-modal payloader-modal--log">
+          <div class="payloader-modal payloader-modal--log">
           <div class="payloader-modal-header">
             <div class="payloader-log-header-main">
-              <h3>执行日志 ({{ logData.length }} 条)</h3>
+              <h3>执行日志 ({{ logRounds.length }} 轮 / {{ logData.length }} 条任务)</h3>
               <p v-if="currentLogTaskId" class="payloader-log-header-sub">
                 任务 {{ currentLogTaskId }} · 当前阶段 {{ getPhaseLabel(logPhase) }}
               </p>
@@ -538,31 +586,47 @@
             <div v-else-if="logData.length === 0" class="payloader-log-empty">
               {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
             </div>
-            <div v-for="(log, idx) in logData" :key="idx" class="payloader-log-entry">
-              <div class="payloader-log-meta">
-                <span class="payloader-log-round">#{{ idx + 1 }}</span>
-                <span class="payloader-log-tool">{{ log.tool }}</span>
-                <span :class="['payloader-log-status', `payloader-log-status--${log.status || 'completed'}`]">
-                  {{ getLogStatusLabel(log.status) }}
-                </span>
-                <span class="payloader-log-time">{{ formatActionTime(log.time) }}</span>
-                <span v-if="log.returncode !== null" :class="['payloader-log-rc', log.returncode === 0 ? 'ok' : 'err']">rc={{ log.returncode }}</span>
+            <div v-for="(round, roundIdx) in logRounds" :key="round.key" class="payloader-log-round-group">
+              <div class="payloader-log-round-header">
+                <span class="payloader-log-round">Round {{ round.round ?? roundIdx + 1 }}</span>
+                <span class="payloader-log-round-count">{{ round.actions.length }} 个任务</span>
+                <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
               </div>
               <div class="payloader-log-think">
                 <div class="payloader-log-think-label">🤖 AI 决策</div>
-                <pre class="payloader-log-think-content">{{ formatActionPayload(log.llm_decision, '[暂无决策记录]') }}</pre>
+                <pre class="payloader-log-think-content">{{ formatActionPayload(round.llm_decision, '[暂无决策记录]') }}</pre>
               </div>
-              <div v-if="log.args" class="payloader-log-args">
-                <div class="payloader-log-args-label">📌 参数</div>
-                <pre class="payloader-log-code">{{ formatActionPayload(log.args, '无参数') }}</pre>
-              </div>
-              <div v-if="log.full_stdout || log.result || log.status === 'running'" class="payloader-log-stdout">
-                <div class="payloader-log-stdout-label">📤 原始输出</div>
-                <pre class="payloader-log-code">{{ formatActionPayload(log.full_stdout || log.result, log.status === 'running' ? '工具执行中，等待输出...' : '暂无输出') }}</pre>
-              </div>
-              <div v-if="log.error" class="payloader-log-error">
-                <div class="payloader-log-error-label">❌ 错误</div>
-                <pre class="payloader-log-code">{{ formatActionPayload(log.error, '暂无错误信息') }}</pre>
+              <div v-for="(log, actionIdx) in round.actions" :key="log.id || `${round.key}-${actionIdx}`" class="payloader-log-entry">
+                <div class="payloader-log-meta">
+                  <span v-if="log.task_label" class="payloader-log-task">{{ log.task_label }}</span>
+                  <span class="payloader-log-tool">{{ log.tool }}</span>
+                  <span v-if="log.surface" class="payloader-log-surface">{{ log.surface }}</span>
+                  <span :class="['payloader-log-status', `payloader-log-status--${log.status || 'completed'}`]">
+                    {{ getLogStatusLabel(log.status) }}
+                  </span>
+                  <span class="payloader-log-time">{{ formatActionTime(log.time) }}</span>
+                  <span v-if="log.returncode !== null" :class="['payloader-log-rc', log.returncode === 0 ? 'ok' : 'err']">rc={{ log.returncode }}</span>
+                </div>
+                <div v-if="log.purpose" class="payloader-log-args">
+                  <div class="payloader-log-args-label">🎯 目的</div>
+                  <pre class="payloader-log-code">{{ formatActionPayload(log.purpose, '暂无目的说明') }}</pre>
+                </div>
+                <div v-if="log.args" class="payloader-log-args">
+                  <div class="payloader-log-args-label">📌 参数</div>
+                  <pre class="payloader-log-code">{{ formatActionPayload(log.args, '无参数') }}</pre>
+                </div>
+                <div v-if="log.capabilities?.length" class="payloader-log-args">
+                  <div class="payloader-log-args-label">🧠 能力</div>
+                  <pre class="payloader-log-code">{{ log.capabilities.join(', ') }}</pre>
+                </div>
+                <div v-if="log.full_stdout || log.result || log.status === 'running'" class="payloader-log-stdout">
+                  <div class="payloader-log-stdout-label">📤 原始输出</div>
+                  <pre class="payloader-log-code">{{ formatActionPayload(log.full_stdout || log.result, log.status === 'running' ? '工具执行中，等待输出...' : '暂无输出') }}</pre>
+                </div>
+                <div v-if="log.error" class="payloader-log-error">
+                  <div class="payloader-log-error-label">❌ 错误</div>
+                  <pre class="payloader-log-code">{{ formatActionPayload(log.error, '暂无错误信息') }}</pre>
+                </div>
               </div>
             </div>
           </div>
@@ -882,12 +946,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, watch, onUnmounted } from 'vue';
 import PayloaderToolbar from './components/PayloaderToolbar.vue';
 import PayloaderContent from './components/PayloaderContent.vue';
 import EncodingTools from './components/EncodingTools.vue';
 import { usePayloader } from './composables/usePayloaderState';
 import type { PayloadItem, ToolCommand, I18nText } from './types';
+import { aiService } from '../ai/aiService';
 
 const { 
   state, 
@@ -1060,18 +1125,41 @@ const handleCopy = async (code: string) => {
   await copyPayload(code);
 };
 
-// ==================== 一键渗透 Agent ====================
+ // ==================== 安全检测 Agent ====================
 const showPentestModal = ref(false);
 const showResultModal = ref(false);
+const showCloseConfirmModal = ref(false);
 const agentRunning = ref(false);
 const agentError = ref('');
 const agentResult = ref<any>(null);
+const stoppingTask = ref(false);
 const pentestTarget = ref<string>('');
+type PentestExecutionMode = 'serial' | 'parallel';
+const PENTEST_EXECUTION_MODE_STORAGE_KEY = 'LERT-pentest-execution-mode';
+const pentestExecutionMode = ref<PentestExecutionMode>(loadPentestExecutionMode());
 const pentestModalError = ref('');
 const normalizedPentestTarget = computed(() => String(pentestTarget.value || '').trim());
 const currentTaskId = ref<string>('');
 
 let statusTimer: ReturnType<typeof setInterval> | null = null;
+
+function loadPentestExecutionMode(): PentestExecutionMode {
+  try {
+    const cached = localStorage.getItem(PENTEST_EXECUTION_MODE_STORAGE_KEY);
+    return cached === 'serial' ? 'serial' : 'parallel';
+  } catch {
+    return 'parallel';
+  }
+}
+
+function setPentestExecutionMode(mode: PentestExecutionMode) {
+  pentestExecutionMode.value = mode;
+  try {
+    localStorage.setItem(PENTEST_EXECUTION_MODE_STORAGE_KEY, mode);
+  } catch {
+    // ignore persistence errors
+  }
+}
 
 function getAIConfig() {
   try {
@@ -1100,26 +1188,158 @@ function closePentestModal() {
   showPentestModal.value = false;
 }
 
-function getPhaseLabel(phase: string | undefined) {
-  switch (phase) {
-    case 'init':
-      return '初始化';
-    case 'recon':
-      return '侦察与信息收集';
-    case 'web':
-      return 'Web 漏洞发现';
-    case 'exploit':
-      return '漏洞利用';
-    case 'post':
-      return '后渗透与证据收集';
-    case 'lateral':
-      return '横向移动与扩展';
-    case 'done':
-      return '已完成';
-    default:
-      return phase || '运行中';
+function closeResultModal() {
+  showCloseConfirmModal.value = false;
+  showResultModal.value = false;
+}
+
+function requestCloseResultModal() {
+  if (agentRunning.value && currentTaskId.value) {
+    showCloseConfirmModal.value = true;
+    return;
+  }
+  closeResultModal();
+}
+
+function cancelCloseConfirmation() {
+  showCloseConfirmModal.value = false;
+}
+
+function continueTaskInBackground() {
+  closeResultModal();
+}
+
+async function interruptTaskAndClose() {
+  if (!currentTaskId.value || stoppingTask.value) {
+    closeResultModal();
+    return;
+  }
+
+  stoppingTask.value = true;
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    await pythonApi.pentestStop(currentTaskId.value);
+    if (statusTimer) {
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
+    agentRunning.value = false;
+    showCloseConfirmModal.value = false;
+    agentError.value = '';
+
+    const currentPhase = agentResult.value?.phase || 'init';
+    agentResult.value = {
+      status: 'failed',
+      final: {
+        report: '# 正在生成阶段性总结报告...\n\n任务已中断，正在根据当前阶段已获取的信息整理总结，请稍候。',
+        phase: currentPhase,
+      },
+      phase: currentPhase,
+      targets: agentResult.value?.targets || [normalizedPentestTarget.value].filter(Boolean),
+      findings_count: agentResult.value?.findings_count || 0,
+      vuln_count: agentResult.value?.vuln_count || 0,
+      actions_count: agentResult.value?.actions_count || 0,
+      actions: agentResult.value?.actions || [],
+    };
+
+    (window as any).showNotification?.('任务已中断，正在生成总结报告', 'success');
+
+    const summary = await buildInterruptedPentestSummary(currentTaskId.value);
+    agentResult.value = {
+      status: 'failed',
+      final: {
+        report: summary.report,
+        phase: summary.phase,
+      },
+      phase: summary.phase,
+      targets: agentResult.value?.targets || [normalizedPentestTarget.value].filter(Boolean),
+      findings_count: summary.findingsCount,
+      vuln_count: summary.vulnCount,
+      actions_count: summary.actionsCount,
+      actions: summary.actions,
+    };
+  } catch (err: any) {
+    (window as any).showNotification?.(err?.message || '中断任务失败', 'error');
+  } finally {
+    stoppingTask.value = false;
   }
 }
+
+function getPhaseLabel(phase: string | undefined) {
+  switch (phase) {
+    case 'init':    return '初始化';
+    case 'recon':   return '侦察与信息收集';
+    case 'web':     return 'Web 漏洞发现';
+    case 'exploit': return '漏洞利用';
+    case 'post':    return '后渗透与证据收集';
+    case 'lateral': return '横向移动与扩展';
+    case 'done':    return '已完成';
+    default:        return phase || '运行中';
+  }
+}
+
+const currentActionSummary = computed(() => {
+  if (!agentResult.value?.actions?.length) return '';
+  const latest = agentResult.value.actions[agentResult.value.actions.length - 1];
+  if (!latest) return '';
+  if (latest.tool === '_llm_wait') {
+    return 'AI 正在分析当前态势，规划下一步操作...';
+  }
+  if (latest.status === 'running') {
+    const toolLabel: Record<string, string> = {
+      nmap: '端口扫描',
+      msfconsole: '漏洞利用',
+      hydra: '密码爆破',
+      shell: '命令执行',
+      searchsploit: '漏洞搜索',
+      nuclei: '漏洞扫描',
+      sqlmap: 'SQL注入检测',
+      ffuf: '目录扫描',
+      nikto: 'Web扫描',
+    };
+    const label = toolLabel[latest.tool] || latest.tool;
+    return `正在执行: ${label}`;
+  }
+  return '';
+});
+
+const currentActionElapsed = ref('');
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+const compactActionItems = computed(() => {
+  const actions = Array.isArray(agentResult.value?.actions) ? agentResult.value.actions : [];
+  return actions.slice(-3).reverse();
+});
+
+watch([() => agentResult.value?.actions, agentRunning], () => {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (!agentRunning.value || !agentResult.value?.actions?.length) {
+    currentActionElapsed.value = '';
+    return;
+  }
+  const latest = agentResult.value.actions[agentResult.value.actions.length - 1];
+  if (!latest || latest.status !== 'running') {
+    currentActionElapsed.value = '';
+    return;
+  }
+  const startTime = new Date(latest.time).getTime();
+  if (Number.isNaN(startTime)) {
+    currentActionElapsed.value = '';
+    return;
+  }
+  const updateElapsed = () => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    if (elapsed < 60) {
+      currentActionElapsed.value = `${elapsed}s`;
+    } else {
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      currentActionElapsed.value = `${min}m${sec}s`;
+    }
+  };
+  updateElapsed();
+  elapsedTimer = setInterval(updateElapsed, 1000);
+}, { deep: true });
 
 function formatActionTime(value: string | undefined) {
   if (!value) {
@@ -1138,6 +1358,16 @@ function formatActionTime(value: string | undefined) {
   });
 }
 
+// 移除 ANSI 转义码（终端颜色代码）
+function stripAnsiEscapeCodes(text: string): string {
+  // 匹配 ANSI 转义序列: ESC [ ... m 或 ESC [ ... ; ... m 等
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+    // 匹配其他常见 ANSI 转义序列
+    .replace(/\x1b\([0-9a-zA-Z]/g, '')
+    .replace(/\x1b\)[0-9a-zA-Z]/g, '')
+    .replace(/\x1b[0-9]/g, '');
+}
+
 function formatActionPayload(value: unknown, fallback: string) {
   if (value === null || value === undefined) {
     return fallback;
@@ -1147,11 +1377,17 @@ function formatActionPayload(value: unknown, fallback: string) {
     try {
       return JSON.stringify(value, null, 2);
     } catch {
-      return String(value);
+      return stripAnsiEscapeCodes(String(value));
     }
   }
 
-  const text = String(value).trim();
+  const rawText = String(value).trim();
+  if (!rawText) {
+    return fallback;
+  }
+
+  // 先移除 ANSI 转义码
+  const text = stripAnsiEscapeCodes(rawText);
   if (!text) {
     return fallback;
   }
@@ -1165,6 +1401,295 @@ function formatActionPayload(value: unknown, fallback: string) {
   }
 
   return text;
+}
+
+function summarizeActionPayload(value: unknown, fallback: string, maxLength = 120) {
+  const formatted = formatActionPayload(value, fallback)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!formatted) {
+    return fallback;
+  }
+
+  if (formatted.length <= maxLength) {
+    return formatted;
+  }
+
+  return `${formatted.slice(0, maxLength).trimEnd()}...`;
+}
+
+function renderReportMarkdown(md: string): string {
+  try {
+    return md
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      .replace(/^---$/gm, '<hr>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/\n/g, '<br>');
+  } catch {
+    return md.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+  }
+}
+
+function buildFallbackPentestReport(params: {
+  phase: string;
+  target?: string;
+  findingsCount?: number;
+  vulnCount?: number;
+  actionsCount?: number;
+  error?: string;
+  actions?: Array<{ tool?: string; time?: string; result?: string; status?: string }>;
+}) {
+  return [
+    '## 总结',
+    params.error
+      ? `任务在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
+      : `任务在 ${getPhaseLabel(params.phase)} 阶段结束。`,
+    '',
+    `- 目标: ${params.target || normalizedPentestTarget.value || '未知目标'}`,
+    `- 风险等级: ${getPentestRiskLevel(params.vulnCount || 0, 0)}`,
+    `- 执行动作: ${params.actionsCount || 0} 步`,
+    `- 发现资产: ${params.findingsCount || 0} 项`,
+    `- 发现漏洞: ${params.vulnCount || 0} 项`,
+    '',
+    '## 说明',
+    '- 当前仅能基于已有执行结果生成简要总结。',
+    '- 详细参数、原始输出和完整过程请查看右上角“日志”。',
+  ].join('\n');
+}
+
+function extractPotentialVulnerabilityHints(report: string, vulnCount: number): string[] {
+  const lines = report
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const matched = lines.filter((line) => /漏洞|风险|可利用|exploit|cve/i.test(line)).slice(0, 5);
+  if (matched.length > 0) {
+    return matched;
+  }
+  if (vulnCount > 0) {
+    return [`已发现 ${vulnCount} 项潜在漏洞，建议结合执行日志继续验证利用条件。`];
+  }
+  return [];
+}
+
+function getPentestRiskLevel(vulnCount: number, failedCount: number) {
+  if (vulnCount >= 3) return '高';
+  if (vulnCount >= 1) return '中';
+  if (failedCount > 0) return '待确认';
+  return '低';
+}
+
+function buildUserFacingPentestReport(params: {
+  phase: string;
+  target?: string;
+  findingsCount?: number;
+  vulnCount?: number;
+  actionsCount?: number;
+  error?: string;
+  backendReport?: string;
+  logs?: PentestLogEntry[];
+}) {
+  const logs = params.logs || [];
+  const actionableLogs = logs.filter((log) => !String(log.tool || '').startsWith('_'));
+  const completedLogs = actionableLogs.filter((log) => (log.status || 'completed') !== 'failed' && !log.error);
+  const failedLogs = actionableLogs.filter((log) => (log.status || 'completed') === 'failed' || !!log.error || (typeof log.returncode === 'number' && log.returncode !== 0));
+
+  const workedOn = Array.from(new Set(actionableLogs.map((log) => {
+    const purpose = summarizeActionPayload(log.purpose, '', 100);
+    return purpose || `${log.tool} ${summarizeActionPayload(log.args, '', 70)}`.trim();
+  }).filter(Boolean))).slice(0, 6);
+
+  const successItems = completedLogs.slice(0, 5).map((log) => `- ${log.tool}: ${summarizeActionPayload(log.result || log.full_stdout || log.purpose, '执行完成', 140)}`);
+  const failureItems = failedLogs.slice(0, 5).map((log) => `- ${log.tool}: ${summarizeActionPayload(log.error || log.result || log.full_stdout, '执行失败', 140)}`);
+  const decisionItems = Array.from(new Set(
+    logs
+      .map((log) => summarizeActionPayload(log.llm_decision, '', 220))
+      .filter(Boolean)
+  )).slice(0, 4).map((item) => `- ${item}`);
+  const vulnHints = extractPotentialVulnerabilityHints(params.backendReport || '', params.vulnCount || 0);
+  const riskLevel = getPentestRiskLevel(params.vulnCount || 0, failedLogs.length);
+
+  return [
+    '## 总结',
+    params.error
+      ? `任务在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
+      : `任务已在 ${getPhaseLabel(params.phase)} 阶段结束。`,
+    `- 风险等级: ${riskLevel}`,
+    `- 做了什么: ${workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测'}`,
+    `- 成功项: ${completedLogs.length} 项`,
+    `- 失败项: ${failedLogs.length} 项`,
+    `- 发现资产: ${params.findingsCount || 0} 项`,
+    `- 发现漏洞: ${params.vulnCount || 0} 项`,
+    '',
+    '## 成功项',
+    ...(successItems.length > 0 ? successItems : ['- 暂无明确成功结果']),
+    '',
+    '## 失败项',
+    ...(failureItems.length > 0 ? failureItems : ['- 暂无明确失败项']),
+    '',
+    '## 可能可利用点',
+    ...(vulnHints.length > 0 ? vulnHints.map((item) => `- ${item}`) : ['- 暂未发现明确可直接利用的漏洞，建议结合日志继续验证。']),
+    '',
+    '## AI 决策摘要',
+    ...(decisionItems.length > 0 ? decisionItems : ['- 暂无 AI 决策记录']),
+  ].join('\n');
+}
+
+async function resolvePentestFinalReport(params: {
+  taskId: string;
+  phase: string;
+  target?: string;
+  findingsCount?: number;
+  vulnCount?: number;
+  actionsCount?: number;
+  error?: string;
+  actions?: Array<{ tool?: string; time?: string; result?: string; status?: string }>;
+}) {
+  let backendReport = '';
+  let finalPhase = params.phase;
+  let normalizedLogs: PentestLogEntry[] = [];
+
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const [report, logs] = await Promise.all([
+      pythonApi.pentestGetReport(params.taskId).catch(() => null),
+      pythonApi.pentestLogs(params.taskId).catch(() => null),
+    ]);
+    backendReport = String(report?.report || '').trim();
+    finalPhase = report?.phase || params.phase;
+    normalizedLogs = (logs?.actions || [])
+      .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
+      .map((item: any) => normalizeLogEntry(item));
+  } catch {
+    // ignore and use fallback
+  }
+
+  return {
+    report: buildUserFacingPentestReport({
+      ...params,
+      phase: finalPhase,
+      backendReport,
+      logs: normalizedLogs,
+    }) || buildFallbackPentestReport(params),
+    phase: finalPhase,
+  };
+}
+
+async function buildInterruptedPentestSummary(taskId: string) {
+  const pythonApi = (await import('../../config/python-api.config')).default;
+
+  const [statusResult, logResult] = await Promise.allSettled([
+    pythonApi.pentestStatus(taskId),
+    pythonApi.pentestLogs(taskId),
+  ]);
+
+  const status = statusResult.status === 'fulfilled' ? statusResult.value : null;
+  const rawLogs = logResult.status === 'fulfilled' ? (logResult.value.actions || []) : [];
+  const normalizedLogs = rawLogs
+    .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
+    .map((item: any) => normalizeLogEntry(item));
+
+  const phase = status?.phase || logPhase.value || agentResult.value?.phase || 'init';
+  const findingsCount = status?.findings_count ?? agentResult.value?.findings_count ?? 0;
+  const vulnCount = status?.vuln_count ?? agentResult.value?.vuln_count ?? 0;
+  const actionsCount = status?.actions_count ?? agentResult.value?.actions_count ?? normalizedLogs.length ?? 0;
+  const actions = Array.isArray(status?.actions) ? status!.actions : (agentResult.value?.actions || []);
+
+  const fallbackReport = buildUserFacingPentestReport({
+    phase,
+    target: normalizedPentestTarget.value,
+    findingsCount,
+    vulnCount,
+    actionsCount,
+    error: '任务已由用户手动中断，以下为中断前的阶段性结果。',
+    logs: normalizedLogs,
+  }) || buildFallbackPentestReport({
+    phase,
+    target: normalizedPentestTarget.value,
+    findingsCount,
+    vulnCount,
+    actionsCount,
+    error: '任务已由用户手动中断，以下为中断前的阶段性结果。',
+    actions,
+  });
+
+  if (!aiService.isConfigured()) {
+    return {
+      report: fallbackReport,
+      phase,
+      findingsCount,
+      vulnCount,
+      actionsCount,
+      actions,
+    };
+  }
+
+  const recentLogs = normalizedLogs.slice(-8).map((log, index) => [
+    `${index + 1}. 工具: ${log.tool}`,
+    `   时间: ${log.time || '未知'}`,
+    `   状态: ${getLogStatusLabel(log.status)}`,
+    `   目的: ${summarizeActionPayload(log.purpose, '暂无目的说明', 120)}`,
+    `   参数: ${summarizeActionPayload(log.args, '无参数', 140)}`,
+    `   输出: ${summarizeActionPayload(log.full_stdout || log.result || log.error, '暂无输出', 180)}`,
+  ].join('\n')).join('\n\n');
+
+  const llmDecisions = Array.from(
+    new Set(
+      normalizedLogs
+        .map((log) => summarizeActionPayload(log.llm_decision, '', 260))
+        .filter((item) => item && item !== '...')
+    )
+  ).slice(-3).join('\n\n');
+
+  try {
+    const report = await aiService.chatStream([
+      {
+        role: 'system',
+        content: '你是一名渗透测试总结助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。必须包含：1. 中断说明 2. 当前阶段与进展 3. 已获得的有效信息 4. 已确认风险/异常 5. 未完成项与下一步建议。不要虚构不存在的结果。',
+      },
+      {
+        role: 'user',
+        content: `目标: ${normalizedPentestTarget.value || '未知目标'}
+任务ID: ${taskId}
+中断时阶段: ${getPhaseLabel(phase)}
+已执行动作: ${actionsCount}
+发现资产: ${findingsCount}
+发现漏洞: ${vulnCount}
+
+AI 决策摘要:
+${llmDecisions || '暂无 AI 决策记录'}
+
+最近执行日志:
+${recentLogs || '暂无执行日志'}
+
+请输出一份阶段性总结报告，明确哪些信息已经确认，哪些任务尚未完成。`,
+      },
+    ]);
+
+    return {
+      report: report?.trim() || fallbackReport,
+      phase,
+      findingsCount,
+      vulnCount,
+      actionsCount,
+      actions,
+    };
+  } catch {
+    return {
+      report: fallbackReport,
+      phase,
+      findingsCount,
+      vulnCount,
+      actionsCount,
+      actions,
+    };
+  }
 }
 
 async function startHostAgent() {
@@ -1195,6 +1720,7 @@ async function startHostAgent() {
       target: normalizedTarget,
       max_rounds: 30,
       dry_run: false,
+      execution_mode: pentestExecutionMode.value,
       api_key: aiConfig.apiKey,
       model: aiConfig.model,
       base_url: aiConfig.baseUrl,
@@ -1225,10 +1751,21 @@ async function pollStatus() {
     if (!status.running) {
       if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
       agentRunning.value = false;
+      agentError.value = '';
 
-      const report = await pythonApi.pentestGetReport(currentTaskId.value);
+      const report = await resolvePentestFinalReport({
+        taskId: currentTaskId.value,
+        phase: status.phase,
+        target: normalizedPentestTarget.value,
+        findingsCount: status.findings_count,
+        vulnCount: status.vuln_count,
+        actionsCount: status.actions_count,
+        error: status.error,
+        actions: status.actions,
+      });
+
       agentResult.value = {
-        status: status.phase === 'done' ? 'completed' : 'failed',
+        status: !status.error && status.phase === 'done' ? 'completed' : 'failed',
         final: { report: report.report, phase: report.phase },
         phase: status.phase,
         targets: status.targets,
@@ -1257,7 +1794,7 @@ async function pollStatus() {
 
 // ==================== 日志查看 ====================
 const showLogModal = ref(false);
-const logData = ref<Array<{
+type PentestLogEntry = {
   id?: string;
   tool: string;
   args: string;
@@ -1269,7 +1806,23 @@ const logData = ref<Array<{
   error: string;
   status?: string;
   updated_at?: string;
-}>>([]);
+  surface?: string;
+  purpose?: string;
+  round?: number;
+  task_label?: string;
+  ports?: number[];
+  capabilities?: string[];
+};
+
+type PentestLogRound = {
+  key: string;
+  round: number | null;
+  time: string;
+  llm_decision: string;
+  actions: PentestLogEntry[];
+};
+
+const logData = ref<PentestLogEntry[]>([]);
 const logLoading = ref(false);
 const logError = ref('');
 const logPhase = ref<string>('init');
@@ -1296,15 +1849,52 @@ function normalizeLogEntry(log: Record<string, unknown>) {
     tool: String(log.tool || 'unknown'),
     args: String(log.args || ''),
     time: String(log.time || ''),
-    result: String(log.result || ''),
-    full_stdout: String(log.full_stdout || ''),
-    llm_decision: String(log.llm_decision || ''),
+    result: stripAnsiEscapeCodes(String(log.result || '')),
+    full_stdout: stripAnsiEscapeCodes(String(log.full_stdout || '')),
+    llm_decision: stripAnsiEscapeCodes(String(log.llm_decision || '')),
     returncode: typeof log.returncode === 'number' ? log.returncode : null,
-    error: String(log.error || ''),
+    error: stripAnsiEscapeCodes(String(log.error || '')),
     status: typeof log.status === 'string' ? log.status : 'completed',
     updated_at: typeof log.updated_at === 'string' ? log.updated_at : undefined,
+    surface: typeof log.surface === 'string' ? log.surface : '',
+    purpose: stripAnsiEscapeCodes(typeof log.purpose === 'string' ? log.purpose : ''),
+    round: typeof log.round === 'number' ? log.round : undefined,
+    task_label: typeof log.task_label === 'string' ? log.task_label : '',
   };
 }
+
+const logRounds = computed<PentestLogRound[]>(() => {
+  const groups: PentestLogRound[] = [];
+  const groupIndex = new Map<string, number>();
+
+  logData.value.forEach((log, index) => {
+    const round = typeof log.round === 'number' ? log.round : null;
+    const key = round !== null ? `round-${round}` : `single-${log.id || index}`;
+    let group = groupIndex.has(key) ? groups[groupIndex.get(key)!] : undefined;
+
+    if (!group) {
+      group = {
+        key,
+        round,
+        time: log.time,
+        llm_decision: log.llm_decision,
+        actions: [],
+      };
+      groupIndex.set(key, groups.length);
+      groups.push(group);
+    }
+
+    if (!group.llm_decision && log.llm_decision) {
+      group.llm_decision = log.llm_decision;
+    }
+    if (!group.time && log.time) {
+      group.time = log.time;
+    }
+    group.actions.push(log);
+  });
+
+  return groups;
+});
 
 function stopLogPolling() {
   if (logTimer) {
@@ -1323,7 +1913,7 @@ function syncLogPolling() {
   if (currentLogTaskId.value === currentTaskId.value && agentRunning.value) {
     logTimer = setInterval(() => {
       void loadLogs(currentLogTaskId.value, true);
-    }, 1500);
+    }, 400);
   }
 }
 
@@ -1364,7 +1954,9 @@ async function loadLogs(taskId?: string, silent = false) {
     const pythonApi = (await import('../../config/python-api.config')).default;
     const res = await pythonApi.pentestLogs(tid);
     logPhase.value = res.phase || 'init';
-    logData.value = (res.actions || []).map(normalizeLogEntry);
+    logData.value = (res.actions || [])
+      .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
+      .map(normalizeLogEntry);
   } catch (err: any) {
     console.error('加载日志失败:', err);
     logError.value = err?.message || '加载日志失败';
@@ -2281,6 +2873,100 @@ onUnmounted(() => {
   border-right-color: rgba(168, 85, 247, 0.8);
   border-radius: 50%;
   animation: payloader-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.payloader-agent-running-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.payloader-agent-running-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.payloader-agent-phase-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--primary-color);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.payloader-agent-round-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 8px;
+}
+
+.payloader-agent-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-left: 8px;
+  animation: payloader-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes payloader-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.payloader-agent-current-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.payloader-agent-current-action-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: payloader-pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.payloader-agent-current-action-text {
+  flex: 1;
+}
+
+.payloader-agent-current-action-elapsed {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.payloader-agent-action-running {
+  border-color: rgba(168, 85, 247, 0.3);
+  background: rgba(168, 85, 247, 0.04);
+}
+
+.payloader-agent-action-tool-active {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.payloader-agent-action-status-running {
+  font-size: 11px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
 }
 
 .payloader-agent-running-text {
@@ -2359,6 +3045,57 @@ onUnmounted(() => {
 
 .payloader-agent-live-log-section {
   padding-top: 16px;
+}
+
+.payloader-agent-live-log--compact {
+  gap: 10px;
+}
+
+.payloader-agent-log-hint {
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.payloader-agent-compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.payloader-agent-compact-item {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.payloader-agent-compact-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.payloader-agent-compact-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.payloader-agent-compact-line + .payloader-agent-compact-line {
+  margin-top: 6px;
+}
+
+.payloader-agent-compact-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
 }
 
 .payloader-agent-action-list {
@@ -2831,6 +3568,19 @@ onUnmounted(() => {
   color: var(--success-color, #00ff88);
 }
 
+.payloader-agent-report-section .payloader-agent-report-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.payloader-agent-report-content h1 { font-size: 1.4em; font-weight: 600; margin: 16px 0 8px; color: var(--text-primary); }
+.payloader-agent-report-content h2 { font-size: 1.2em; font-weight: 600; margin: 14px 0 6px; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+.payloader-agent-report-content h3 { font-size: 1.1em; font-weight: 600; margin: 10px 0 4px; color: var(--text-primary); }
+.payloader-agent-report-content strong { color: var(--text-primary); }
+.payloader-agent-report-content code { background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+.payloader-agent-report-content li { margin: 4px 0; padding-left: 4px; }
+.payloader-agent-report-content hr { border: none; border-top: 1px solid var(--border-color); margin: 12px 0; }
+
 .payloader-agent-skill-summary {
   font-size: 12px;
   color: var(--text-secondary);
@@ -3147,6 +3897,10 @@ onUnmounted(() => {
   animation: slideUp 0.3s ease;
 }
 
+.payloader-modal--confirm {
+  width: 460px;
+}
+
 .payloader-modal-header {
   display: flex;
   align-items: center;
@@ -3182,6 +3936,18 @@ onUnmounted(() => {
   color: var(--text-primary, #e4e4e7);
 }
 
+.payloader-btn--danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.payloader-btn--danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  border-color: #b91c1c;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.28);
+}
+
 .payloader-modal-body {
   padding: 20px 24px;
 }
@@ -3197,6 +3963,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.payloader-modal-input-group--mode {
+  margin-top: 14px;
 }
 
 .payloader-modal-label {
@@ -3233,6 +4003,37 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary, #a1a1aa);
+}
+
+.payloader-mode-toggle {
+  display: flex;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: var(--bg-primary, #12121a);
+  overflow: hidden;
+}
+
+.payloader-mode-toggle-btn {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.payloader-mode-toggle-btn:not(.active):hover {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+  color: var(--text-primary, #e4e4e7);
+}
+
+.payloader-mode-toggle-btn.active {
+  background: var(--primary-color, #3b82f6);
+  color: #fff;
 }
 
 .payloader-modal-error {
@@ -3662,8 +4463,31 @@ onUnmounted(() => {
   color: var(--error-color);
 }
 
+.payloader-log-round-group {
+  margin-bottom: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.payloader-log-round-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.08));
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.payloader-log-round-count {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
 .payloader-log-entry {
-  margin-bottom: 16px;
+  margin: 0 12px 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
@@ -3690,6 +4514,21 @@ onUnmounted(() => {
   color: var(--accent-color, var(--primary-color));
   font-weight: 600;
   font-size: 13px;
+}
+
+.payloader-log-task {
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.payloader-log-surface {
+  color: var(--text-secondary);
+  font-size: 12px;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .payloader-log-status {
@@ -3747,6 +4586,10 @@ onUnmounted(() => {
 .payloader-log-error {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.payloader-log-round-group > .payloader-log-think {
+  background: rgba(59, 130, 246, 0.03);
 }
 
 .payloader-log-think-label,

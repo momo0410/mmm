@@ -26,13 +26,13 @@
         </div>
         <textarea
           v-model="input"
-          :placeholder="activeEncoding === 'jwt' ? '请输入 JWT Token...' : '请输入要编码/解码的内容...'"
+          :placeholder="activeEncoding === 'jwt' ? '编码请输入 JSON Payload，解码请输入 JWT Token...' : '请输入要编码/解码的内容...'"
           spellcheck="false"
         />
       </div>
 
       <div class="encoding-actions">
-        <button class="action-btn encode" @click="encode" :disabled="activeEncoding === 'jwt'">
+        <button class="action-btn encode" @click="encode">
           编码
         </button>
         <button class="action-btn swap" @click="swapInputOutput">
@@ -81,7 +81,7 @@
         Unicode 编码将字符转换为 Unicode 转义序列（\uXXXX 格式）。常用于国际化文本处理。
       </p>
       <p v-else-if="activeEncoding === 'jwt'">
-        JWT (JSON Web Token) 解码器可以解析 JWT 的 header 和 payload 部分。注意：此功能仅支持解码，不支持编码。
+        JWT (JSON Web Token) 支持编码和解码。编码时请输入 JSON payload，系统会生成一个使用 none 算法的未签名 JWT；解码时请输入完整的 JWT Token。
       </p>
     </div>
   </div>
@@ -104,7 +104,7 @@ const encodingOptions: EncodingOption[] = [
   { id: 'hex', name: 'Hex', icon: '🔢', desc: '十六进制编码/解码' },
   { id: 'html', name: 'HTML', icon: '📄', desc: 'HTML 实体编码/解码' },
   { id: 'unicode', name: 'Unicode', icon: '🌐', desc: 'Unicode 编码/解码' },
-  { id: 'jwt', name: 'JWT', icon: '🔑', desc: 'JWT Token 解码' },
+  { id: 'jwt', name: 'JWT', icon: '🔑', desc: 'JWT 编码/解码' },
 ];
 
 const input = ref('');
@@ -141,9 +141,12 @@ const decode = () => {
 };
 
 const swapInputOutput = () => {
+  const visibleOutput = error.value || output.value;
   const temp = input.value;
-  input.value = output.value;
+  input.value = visibleOutput;
   output.value = temp;
+  error.value = '';
+  copied.value = false;
 };
 
 const copyToClipboard = async () => {
@@ -283,7 +286,7 @@ const clearAll = () => {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
-  resize: vertical;
+  resize: none;
   transition: border-color 0.2s ease;
 }
 

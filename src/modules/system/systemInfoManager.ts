@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '../../shims/@tauri-apps/api/core';
+import { sshConnectionManager } from '../remote/sshConnectionManager';
 
 export interface SystemInfo {
   hostname: string;
@@ -54,8 +55,10 @@ export interface SystemInfo {
     processes: Array<{
       pid: string;
       user: string;
+      stat?: string;
       cpu: string;
       memory: string;
+      etime?: string;
       command: string;
     }>;
     networkDetails: Array<{
@@ -186,7 +189,7 @@ export class SystemInfoManager {
         this.executeCommand('cat /etc/resolv.conf | grep nameserver'),
         this.executeCommand('ip route | grep default'),
         // 详细信息 - 添加STAT列，使用完整命令
-        this.executeCommand('ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,cmd}\''),
+        this.executeCommand('ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,$10,cmd}\''),
         this.getNetworkConnectionDetails(),
         this.executeCommand('systemctl list-units --type=service --no-pager --no-legend | awk \'BEGIN{OFS=","} {print $1,$3,$4,$5" "$6" "$7" "$8" "$9}\''),
         this.executeCommand('getent passwd | awk -F: \'BEGIN{OFS=","} {print $1,$3,$4,$6,$7}\''),
@@ -481,7 +484,7 @@ export class SystemInfoManager {
 
   private async _fetchProcesses(): Promise<any[]> {
     const result = await this.executeCommand(
-      'ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,cmd}\''
+      'ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,$10,cmd}\''
     );
     return this.parseProcesses(result);
   }
@@ -622,6 +625,16 @@ export class SystemInfoManager {
       }
     } catch (error) {
       console.error(`❌ 命令执行失败: ${command}`, error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (/没有活动的 SSH 连接|not connected|connection lost|broken pipe|EOF|reset/i.test(errMsg)) {
+        try {
+          // 使用静默模式（notify=false），避免命令执行瞬态异常直接清除前端已确认的连接状态。
+          // 如果连接确实断开，应由专门的连接监控机制来处理状态更新。
+          await sshConnectionManager.checkConnectionStatus(false);
+        } catch {
+          // 状态刷新失败不阻断原错误抛出
+        }
+      }
       throw new Error(`命令执行失败: ${error}`);
     }
   }
@@ -918,7 +931,7 @@ export class SystemInfoManager {
         cronJobsData,
         firewallRulesData
       ] = await Promise.all([
-        this.executeCommand('ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,cmd}\''),
+        this.executeCommand('ps aux --no-headers | awk \'BEGIN{OFS=","} {cmd=""; for(i=11;i<=NF;i++) cmd=cmd $i" "; print $2,$1,$8,$3,$4,$10,cmd}\''),
         this.getNetworkConnectionDetails(),
         this.executeCommand('systemctl list-units --type=service --no-pager --no-legend | awk \'BEGIN{OFS=","} {print $1,$3,$4,$5" "$6" "$7" "$8" "$9}\''),
         this.executeCommand('getent passwd | awk -F: \'BEGIN{OFS=","} {print $1,$3,$4,$6,$7}\''),
@@ -1093,18 +1106,20 @@ export class SystemInfoManager {
   /**
    * 解析进程信息
    */
-  private parseProcesses(data: string): Array<{ pid: string; user: string; stat: string; cpu: string; memory: string; command: string }> {
+  private parseProcesses(data: string): Array<{ pid: string; user: string; stat: string; cpu: string; memory: string; etime: string; command: string }> {
     if (!data.trim()) return [];
 
     return data.trim().split('\n').map(line => {
       const parts = line.split(',');
+      const hasEtime = parts.length >= 7;
       return {
         pid: parts[0] || '',
         user: parts[1] || '',
         stat: parts[2] || '',
         cpu: parts[3] || '0',
         memory: parts[4] || '0',
-        command: (parts[5] || '').trim()
+        etime: hasEtime ? (parts[5] || '--').trim() : '--',
+        command: (hasEtime ? parts.slice(6).join(',') : parts.slice(5).join(',')).trim()
       };
     }).filter(p => p.pid);
   }

@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSH Terminal - Linux Emergency Response Tool</title>
+    <title>安御智测</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="stylesheet" href="/src/css/base.css">
     <style>
         body {
@@ -79,26 +80,8 @@
 </head>
 <body>
     <div id="app">
-        <!-- 自定义标题栏（仅在非 macOS 上显示） -->
-        <div class="modern-title-bar" data-tauri-drag-region id="custom-title-bar">
-            <div class="title-bar-left">
-                <div class="app-logo">
-                    <div class="logo-icon" style="width: 24px; height: 24px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                        <img src="/logo.png" alt="LERT Logo">
-                    </div>
-                    <div class="app-info">
-                        <div class="app-name" style="font-size: 14px;">SSH Terminal</div>
-                        <div style="font-size: 9px; color: var(--text-secondary);">Linux Emergency Response Tool</div>
-                    </div>
-                </div>
-            </div>
-            <div class="title-bar-right" id="window-controls-container">
-                <!-- 窗口控制按钮将通过 JavaScript 动态添加（非 macOS） -->
-            </div>
-        </div>
-
         <!-- SSH终端内容 -->
-        <div id="ssh-terminal-content"></div>
+        <div id="ssh-terminal-content" style="height: 100vh;"></div>
     </div>
 
     <script type="module">
@@ -113,46 +96,6 @@
 
         // 检测是否为 macOS
         const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
-        // 根据平台调整界面
-        const customTitleBar = document.getElementById('custom-title-bar');
-        const terminalContent = document.getElementById('ssh-terminal-content');
-
-        if (isMacOS) {
-            // macOS: 隐藏自定义标题栏，使用原生标题栏
-            if (customTitleBar) {
-                customTitleBar.style.display = 'none';
-            }
-            if (terminalContent) {
-                terminalContent.style.height = '100vh';
-            }
-        } else {
-            // 其他平台: 显示自定义标题栏和窗口控制按钮
-            if (terminalContent) {
-                terminalContent.style.height = 'calc(100vh - 45px)';
-            }
-
-            const container = document.getElementById('window-controls-container');
-            if (container) {
-                container.innerHTML = `
-                    <button class="control-button minimize-btn" onclick="minimizeWindow()" title="最小化">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                            <rect x="2" y="5.5" width="8" height="1"/>
-                        </svg>
-                    </button>
-                    <button class="control-button maximize-btn" onclick="toggleMaximize()" title="最大化">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                            <rect x="2" y="2" width="8" height="8" stroke="currentColor" stroke-width="1" fill="none"/>
-                        </svg>
-                    </button>
-                    <button class="control-button close-btn close" onclick="closeWindow()" title="关闭">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                            <path d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </button>
-                `;
-            }
-        }
 
         // 窗口控制函数
         window.minimizeWindow = async () => {

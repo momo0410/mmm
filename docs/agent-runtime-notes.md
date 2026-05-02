@@ -372,79 +372,59 @@ if isinstance(planner, LLMPlanner):
 
 ### 3.2 Skill 扩展点
 
-**位置**: `src-python/app/services/agent/skills/registry.py:60-169`
+**位置**: `src-python/app/services/skill_engine/skill_loader.py`
 
 **新增 Skill 步骤**:
 
-1. **创建 Skill 类** (继承 `BaseSkill`):
-```python
-from app.services.agent.skills.registry import BaseSkill, SkillStep
-from app.services.agent.schemas import SkillParameter
-
-class MyCustomSkill(BaseSkill):
-    @property
-    def name(self) -> str:
-        return "my_custom_skill"
-
-    @property
-    def description(self) -> str:
-        return "我的自定义技能描述"
-
-    @property
-    def category(self) -> str:
-        return "investigation"  # triage / investigation / audit / remediation
-
-    @property
-    def parameters(self) -> List[SkillParameter]:
-        return [
-            SkillParameter(
-                name="target_path",
-                type="string",
-                description="目标路径",
-                default="/tmp",
-                required=False,
-            ),
-        ]
-
-    def build_steps(self, args: Dict[str, Any], context: Dict[str, Any]) -> List[SkillStep]:
-        """根据参数动态生成执行步骤"""
-        target_path = args.get("target_path", "/tmp")
-
-        return [
-            SkillStep(
-                name="check_path",
-                description=f"检查路径 {target_path}",
-                tool_name="execute_command",
-                parameters={"command": f"ls -la {target_path}"},
-            ),
-            # 更多步骤...
-        ]
+1. **创建 SKILL.md (知识模式)**:
+```markdown
+---
+name: my_custom_skill
+description: 我的自定义技能描述
+domain: custom
+tags: [custom]
+---
+# My Custom Skill
+## When to Use
+- 当需要执行自定义操作时
+## Workflow
+### Step 1: 检查目标
+### Step 2: 执行操作
 ```
 
-2. **注册到 SkillRegistry**:
-```python
-from app.services.agent.skills import get_default_skill_registry
-
-registry = get_default_skill_registry()
-registry.register(MyCustomSkill())
-```
-
-3. **(可选) 添加到 Planner 关键词映射**:
-```python
-# src-python/app/services/agent/planner.py:456-499
-KEYWORD_MAPPING = {
-    # ...
-    "my_custom_skill": ["自定义", "custom", "my feature"],
+2. **创建 skill.json (流水线模式)**:
+```json
+{
+  "schema_version": "skill-spec/v1",
+  "name": "my_custom_skill",
+  "version": "1.0.0",
+  "description": "我的自定义技能描述",
+  "category": "investigation",
+  "status": "active",
+  "source": "generated",
+  "steps": [
+    {
+      "id": "step1",
+      "name": "检查目标",
+      "description": "检查目标路径",
+      "tool_name": "execute_command",
+      "parameters": {"command": "ls -la /tmp"},
+      "depends_on": []
+    }
+  ]
 }
 ```
 
-**关键方法**:
-- `build_steps(args, context)`: **核心扩展点**，根据 Planner 提取的参数动态生成步骤
-- `parameters`: 声明 Skill 接受的参数 Schema，供 Planner 和前端使用
-- `required_context_keys`: 声明执行所需的上下文 key (如 `["ssh_manager"]`)
+3. **(可选) hybrid 模式**: 同目录放 skill.json + SKILL.md，json 中加 `"knowledge_file": "SKILL.md"`
 
-**向后兼容**:
-- 旧版固定 steps 模式：覆写 `steps` 属性，并在 `build_steps` 中返回 `self.steps`
+**加载方式**:
+```python
+from app.services.skill_engine import SkillLoader
+
+loader = SkillLoader("skills/")
+skills = loader.load_all()
+# mode: "pipeline" | "knowledge" | "hybrid"
+```
 
 ---
 

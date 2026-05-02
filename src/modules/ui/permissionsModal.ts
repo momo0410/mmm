@@ -1,4 +1,4 @@
-// LovelyRes - 权限编辑模态组件
+// SDIT - 权限编辑模态组件
 // 提供用户友好的权限编辑界面
 
 import { invoke } from '../../shims/@tauri-apps/api/core';
