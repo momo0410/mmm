@@ -45,6 +45,7 @@ export interface SystemInfo {
     gateway: string;
     rxBytes: number;
     txBytes: number;
+    latencyMs?: number | null;
   };
   networkConnections: number;
   processCount: number;
@@ -136,6 +137,10 @@ export class SystemInfoManager {
     // 构造函数保持简单
   }
 
+  private getCpuUsageCommand(): string {
+    return `sh -c 'read _ user nice system idle iowait irq softirq steal _ < /proc/stat; total1=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle1=$((idle+iowait)); sleep 0.5; read _ user nice system idle iowait irq softirq steal _ < /proc/stat; total2=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle2=$((idle+iowait)); total=$((total2-total1)); idle_delta=$((idle2-idle1)); if [ "$total" -gt 0 ]; then awk -v total="$total" -v idle="$idle_delta" "BEGIN { printf \\"%.1f%%\\", ((total-idle)*100/total) }"; else echo "0.0%"; fi'`;
+  }
+
   /**
    * 获取系统信息
    */
@@ -172,7 +177,8 @@ export class SystemInfoManager {
         autostartData,
         cronJobsData,
         firewallRulesData,
-        networkTraffic
+        networkTraffic,
+        networkLatency
       ] = await Promise.all([
         // 基础系统信息
         this.executeCommand('hostname'),
@@ -181,7 +187,7 @@ export class SystemInfoManager {
         this.executeCommand('cat /proc/meminfo'),
         this.executeCommand('df -hP'), // 获取所有分区信息
         this.executeCommand('cat /proc/cpuinfo | grep "model name" | head -1 && nproc'),
-        this.executeCommand('top -bn2 -d0.5 | grep "Cpu(s)" | tail -1 | awk \'{print 100-$8"%"}\' || echo "0%"'),
+        this.executeCommand(this.getCpuUsageCommand()),
         this.getNetworkConnectionCount(),
         this.executeCommand('ps aux | wc -l'),
         this.executeCommand('who | wc -l'),
@@ -196,7 +202,8 @@ export class SystemInfoManager {
         this.executeCommand('systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend | awk \'BEGIN{OFS=","} {print $1,$2,"enabled","systemd"}\''),
         this.getCronJobs(),
         this.getFirewallRules(),
-        this.getNetworkTraffic()
+        this.getNetworkTraffic(),
+        this.getNetworkLatency()
       ]);
 
       // 解析基础系统信息
@@ -214,7 +221,8 @@ export class SystemInfoManager {
         networkInterfaces: networkInterfaces.trim(),
         dnsInfo: dnsInfo.trim(),
         gatewayInfo: gatewayInfo.trim(),
-        networkTraffic
+        networkTraffic,
+        networkLatency
       });
 
       // 解析详细信息并缓存
@@ -290,7 +298,7 @@ export class SystemInfoManager {
           { marker: 'DISK', command: 'df -hP' },
           { marker: 'CPU_MODEL', command: 'cat /proc/cpuinfo | grep "model name" | head -1' },
           { marker: 'CPU_CORES', command: 'nproc' },
-          { marker: 'CPU_USAGE', command: 'top -bn2 -d0.5 | grep "Cpu(s)" | tail -1 | awk \'{print 100-$8"%"}\' || echo "0%"' },
+          { marker: 'CPU_USAGE', command: this.getCpuUsageCommand() },
           { marker: 'PROC_COUNT', command: 'ps aux | wc -l' },
           { marker: 'USER_COUNT', command: 'who | wc -l' },
           { marker: 'NET_INTERFACES', command: 'ip addr show | grep -E "inet |UP|DOWN"' },
@@ -300,9 +308,10 @@ export class SystemInfoManager {
         ]);
 
         // 网络相关命令需要单独执行（因为它们有复杂的错误处理逻辑）
-        const [netConnections, networkTraffic] = await Promise.all([
+        const [netConnections, networkTraffic, networkLatency] = await Promise.all([
           this.getNetworkConnectionCount(),
-          this.getNetworkTraffic()
+          this.getNetworkTraffic(),
+          this.getNetworkLatency()
         ]);
 
         // 组装结果
@@ -336,7 +345,8 @@ export class SystemInfoManager {
           networkInterfaces: networkInterfaces.trim(),
           dnsInfo: dnsInfo.trim(),
           gatewayInfo: gatewayInfo.trim(),
-          networkTraffic
+          networkTraffic,
+          networkLatency
         });
 
         // 注意：summary 模式不获取 detailedInfo，保持为 undefined 或保留旧缓存
@@ -648,7 +658,7 @@ export class SystemInfoManager {
     const memTotal = this.extractMemoryValue(memLines[0]);
     const memFree = this.extractMemoryValue(memLines[1]);
     const memAvailable = this.extractMemoryValue(memLines[2]);
-    const memUsed = memTotal - memFree;
+    const memUsed = Math.max(0, memTotal - memAvailable);
 
     // 解析磁盘信息
     const diskLines = rawData.diskInfo.trim().split('\n');
@@ -729,7 +739,8 @@ export class SystemInfoManager {
     const networkInfoWithTraffic = {
       ...networkInfo,
       rxBytes: rawData.networkTraffic?.rx || 0,
-      txBytes: rawData.networkTraffic?.tx || 0
+      txBytes: rawData.networkTraffic?.tx || 0,
+      latencyMs: Number.isFinite(rawData.networkLatency) ? rawData.networkLatency : null
     };
 
     return {
@@ -897,9 +908,7 @@ export class SystemInfoManager {
    */
   async getCpuUsage(): Promise<string> {
     try {
-      const result = await this.executeCommand(
-        "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$3+$4)} END {print usage \"%\"}'"
-      );
+      const result = await this.executeCommand(this.getCpuUsageCommand());
       return result.trim();
     } catch (error) {
       console.error('❌ 获取CPU使用率失败:', error);
@@ -1048,6 +1057,17 @@ export class SystemInfoManager {
     } catch (error) {
       console.error('❌ 获取网络流量失败:', error);
       return { rx: 0, tx: 0 };
+    }
+  }
+
+  private async getNetworkLatency(): Promise<number | null> {
+    try {
+      const result = await this.executeCommand(`sh -c 'target=$(ip route | awk "/default/ {print \\$3; exit}"); if [ -z "$target" ]; then target=$(awk "/^nameserver/ {print \\$2; exit}" /etc/resolv.conf 2>/dev/null); fi; if [ -z "$target" ]; then exit 1; fi; ping -n -q -c 1 -W 1 "$target" 2>/dev/null | awk -F"/" "END { if (NF >= 5) printf \\"%.1f\\n\\", \\$5; else exit 1 }"'`);
+      const latency = Number.parseFloat(result.trim());
+      return Number.isFinite(latency) ? latency : null;
+    } catch (error) {
+      console.warn('⚠️ 获取网络延迟失败:', error);
+      return null;
     }
   }
 

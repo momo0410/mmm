@@ -143,12 +143,12 @@ export class SSHManager {
    * 获取系统摘要信息（轻量版，仅基础指标）
    * 用于连接成功后快速初始化，避免全量加载
    */
-  async fetchSystemSummary(): Promise<SystemInfo> {
+  async fetchSystemSummary(forceRefresh = false): Promise<SystemInfo> {
     const status = await invoke('ssh_get_connection_status').catch(() => null) as any;
     if (!status?.connected) {
       throw new Error('没有活动的 SSH 连接');
     }
-    return this.systemInfoManager.fetchSystemSummary();
+    return this.systemInfoManager.fetchSystemSummary(forceRefresh);
   }
 
   /**

@@ -12,8 +12,31 @@ import {
   Refresh
 } from '@icon-park/svg';
 
+type DashboardLiveSnapshot = {
+  cpuUsage: number;
+  memUsage: number;
+  diskUsage: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  loadPercent: number;
+  downloadRate: number;
+  uploadRate: number;
+  latencyMs: number | null;
+};
+
 export class DashboardRenderer {
   private static readonly HISTORY_MAX = 20;
+
+  private cpuHistory: number[] = [];
+  private memoryHistory: number[] = [];
+  private diskHistory: number[] = [];
+  private downloadHistory: number[] = [];
+  private uploadHistory: number[] = [];
+  private latencyHistory: number[] = [];
+  private lastTrafficSample: { time: number; rxBytes: number; txBytes: number } | null = null;
+  private lastSnapshotTime = -1;
+  private lastSnapshot: DashboardLiveSnapshot | null = null;
 
   private systemMetaCache: {
     os: string;
@@ -22,9 +45,6 @@ export class DashboardRenderer {
     virtualization: string;
     timezone: string;
   } | null = null;
-
-  private memoryHistory: number[] = [];
-  private diskHistory: number[] = [];
 
   constructor() {
     (window as any).dashboardRendererInstance = this;
@@ -48,20 +68,8 @@ export class DashboardRenderer {
       this.loadSystemMeta();
     }, 100);
 
-    const cpuUsage = parseFloat(this.getCpuUsage(systemInfo));
-    const memUsage = parseFloat(this.getMemoryUsage(systemInfo));
-    const diskUsage = parseFloat(this.getDiskUsage(systemInfo));
-
-    this.memoryHistory.push(memUsage);
-    this.diskHistory.push(diskUsage);
-    while (this.memoryHistory.length > DashboardRenderer.HISTORY_MAX) this.memoryHistory.shift();
-    while (this.diskHistory.length > DashboardRenderer.HISTORY_MAX) this.diskHistory.shift();
+    const snapshot = this.getLiveSnapshot(systemInfo);
     const loadAvg = systemInfo.loadAverage || ['0', '0', '0'];
-    const load1 = parseFloat(loadAvg[0]) || 0;
-    const load5 = parseFloat(loadAvg[1]) || 0;
-    const load15 = parseFloat(loadAvg[2]) || 0;
-    const cores = systemInfo.cpuInfo.cores || 1;
-    const loadPercent = Math.min((load5 / cores) * 100, 100);
     const meta = this.systemMetaCache || { os: '检测中...' };
 
     return `
@@ -71,7 +79,7 @@ export class DashboardRenderer {
             <div class="dash-v3-logo">${DashboardIcon({ theme: 'filled', size: '22', fill: 'currentColor' })}</div>
             <div class="dash-v3-title-group">
               <h2 class="dash-v3-title">系统监控仪表盘</h2>
-              <span class="dash-v3-subtitle">最后更新: ${this.formatTime(systemInfo.lastUpdate)}</span>
+              <span id="dashboard-last-update" class="dash-v3-subtitle">最后更新: ${this.formatTime(systemInfo.lastUpdate)}</span>
             </div>
             <div class="dash-v3-system-status">
               <span class="dash-v3-status-dot"></span>
@@ -88,7 +96,7 @@ export class DashboardRenderer {
                 <span>刷新数据</span>
               </button>
               <div class="dash-v3-auto-refresh">
-                <span>自动刷新: <strong>30秒</strong></span>
+                <span>自动刷新: <strong>5秒</strong></span>
               </div>
             </div>
           </div>
@@ -98,31 +106,31 @@ export class DashboardRenderer {
           <div class="dash-v3-info-col">
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">主机名</span>
-              <span class="dash-v3-info-value">${systemInfo.hostname}</span>
+              <span id="dashboard-hostname-value" class="dash-v3-info-value">${systemInfo.hostname}</span>
             </div>
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">总内存</span>
-              <span class="dash-v3-info-value">${systemInfo.memoryUsage.total}</span>
+              <span id="dashboard-memory-total-value" class="dash-v3-info-value">${systemInfo.memoryUsage.total}</span>
             </div>
           </div>
           <div class="dash-v3-info-col">
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">处理器</span>
-              <span class="dash-v3-info-value" title="${systemInfo.cpuInfo.model}">${systemInfo.cpuInfo.model}</span>
+              <span id="dashboard-cpu-model-value" class="dash-v3-info-value" title="${systemInfo.cpuInfo.model}">${systemInfo.cpuInfo.model}</span>
             </div>
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">磁盘总量</span>
-              <span class="dash-v3-info-value">${systemInfo.diskUsage.total}</span>
+              <span id="dashboard-disk-total-value" class="dash-v3-info-value">${systemInfo.diskUsage.total}</span>
             </div>
           </div>
           <div class="dash-v3-info-col">
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">核心数</span>
-              <span class="dash-v3-info-value">${systemInfo.cpuInfo.cores}</span>
+              <span id="dashboard-cpu-cores-value" class="dash-v3-info-value">${systemInfo.cpuInfo.cores}</span>
             </div>
             <div class="dash-v3-info-item">
               <span class="dash-v3-info-label">运行时间</span>
-              <span class="dash-v3-info-value">${systemInfo.uptime}</span>
+              <span id="dashboard-uptime-value" class="dash-v3-info-value">${systemInfo.uptime}</span>
             </div>
           </div>
         </div>
@@ -131,18 +139,18 @@ export class DashboardRenderer {
           <div class="dash-v3-card">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">CPU使用率</span>
-              <span class="dash-v3-card-value">${cpuUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+              <span id="dashboard-cpu-card-value" class="dash-v3-card-value">${snapshot.cpuUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
             </div>
             <div class="dash-v3-card-body dash-v3-center">
               <div class="dash-v3-ring-wrap">
-                <div class="dash-v3-ring" style="--ring-value: ${cpuUsage}; --ring-gradient: linear-gradient(135deg, #22d3ee 0%, #2563eb 52%, #7c3aed 100%);">
+                <div id="dashboard-cpu-ring" class="dash-v3-ring" style="--ring-value: ${snapshot.cpuUsage}; --ring-gradient: linear-gradient(135deg, #22d3ee 0%, #2563eb 52%, #7c3aed 100%);">
                   <div class="dash-v3-ring-inner">
-                    <span class="dash-v3-ring-value">${cpuUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                    <span id="dashboard-cpu-ring-value" class="dash-v3-ring-value">${snapshot.cpuUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
                     <span class="dash-v3-ring-label">CPU使用率</span>
                   </div>
                 </div>
-                <div class="dash-v3-mini-bars">
-                  ${this.renderMiniBarChart(this.memoryHistory.slice(-10), '#3b82f6')}
+                <div id="dashboard-cpu-mini-bars" class="dash-v3-mini-bars">
+                  ${this.renderMiniBarChart(this.cpuHistory.slice(-10), '#3b82f6')}
                 </div>
               </div>
             </div>
@@ -151,74 +159,74 @@ export class DashboardRenderer {
           <div class="dash-v3-card">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">磁盘空间分布</span>
-              <span class="dash-v3-card-value">${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
+              <span id="dashboard-disk-card-value" class="dash-v3-card-value">${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
             </div>
             <div class="dash-v3-card-body dash-v3-center">
-              <div class="dash-v3-ring" style="--ring-value: ${diskUsage}; --ring-gradient: linear-gradient(135deg, #fde047 0%, #f97316 55%, #ef4444 100%);">
+              <div id="dashboard-disk-ring" class="dash-v3-ring" style="--ring-value: ${snapshot.diskUsage}; --ring-gradient: linear-gradient(135deg, #fde047 0%, #f97316 55%, #ef4444 100%);">
                 <div class="dash-v3-ring-inner">
-                  <span class="dash-v3-ring-value">${diskUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                  <span id="dashboard-disk-ring-value" class="dash-v3-ring-value">${snapshot.diskUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
                   <span class="dash-v3-ring-label">使用率</span>
                 </div>
               </div>
             </div>
             <div class="dash-v3-card-footer">
-              <span>可用 ${systemInfo.diskUsage.available}</span>
-              <span>1 分区</span>
+              <span id="dashboard-disk-available">可用 ${systemInfo.diskUsage.available}</span>
+              <span id="dashboard-partition-count">${systemInfo.partitions.length} 分区</span>
             </div>
           </div>
 
           <div class="dash-v3-card">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">系统负载</span>
-              <span class="dash-v3-card-value">${loadAvg.slice(0, 3).join(' / ')}</span>
+              <span id="dashboard-load-card-value" class="dash-v3-card-value">${loadAvg.slice(0, 3).join(' / ')}</span>
             </div>
             <div class="dash-v3-card-body dash-v3-center">
-              <div class="dash-v3-ring" style="--ring-value: ${loadPercent}; --ring-gradient: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 55%, #ec4899 100%);">
+              <div id="dashboard-load-ring" class="dash-v3-ring" style="--ring-value: ${snapshot.loadPercent}; --ring-gradient: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 55%, #ec4899 100%);">
                 <div class="dash-v3-ring-inner">
-                  <span class="dash-v3-ring-value">${loadPercent.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
+                  <span id="dashboard-load-ring-value" class="dash-v3-ring-value">${snapshot.loadPercent.toFixed(0)}<span class="dash-v3-ring-unit">%</span></span>
                   <span class="dash-v3-ring-label">5分钟</span>
                 </div>
               </div>
             </div>
             <div class="dash-v3-card-footer">
-              <span>1分钟 ${load1.toFixed(2)}</span>
-              <span>15分钟 ${load15.toFixed(2)}</span>
+              <span id="dashboard-load-1">1分钟 ${snapshot.load1.toFixed(2)}</span>
+              <span id="dashboard-load-15">15分钟 ${snapshot.load15.toFixed(2)}</span>
             </div>
           </div>
 
           <div class="dash-v3-card dash-v3-card-network">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">网络状态</span>
-              <span class="dash-v3-card-value">${systemInfo.networkConnections}<span class="dash-v3-card-unit"> 连接</span></span>
+              <span id="dashboard-network-connections" class="dash-v3-card-value">${systemInfo.networkConnections}<span class="dash-v3-card-unit"> 连接</span></span>
             </div>
             <div class="dash-v3-card-body">
               <div class="dash-v3-net-stats">
                 <div class="dash-v3-net-stat">
                   <span class="dash-v3-net-label">上传速率</span>
-                  <span class="dash-v3-net-val">--</span>
+                  <span id="dashboard-upload-rate" class="dash-v3-net-val">${this.formatRate(snapshot.uploadRate)}</span>
                 </div>
                 <div class="dash-v3-net-stat">
                   <span class="dash-v3-net-label">下载速率</span>
-                  <span class="dash-v3-net-val">--</span>
+                  <span id="dashboard-download-rate" class="dash-v3-net-val">${this.formatRate(snapshot.downloadRate)}</span>
                 </div>
                 <div class="dash-v3-net-stat">
                   <span class="dash-v3-net-label">响应时间</span>
-                  <span class="dash-v3-net-val">--</span>
+                  <span id="dashboard-latency-value" class="dash-v3-net-val">${this.formatLatency(snapshot.latencyMs)}</span>
                 </div>
               </div>
               <div class="dash-v3-net-chart-box">
                 <div class="dash-v3-net-chart-grid"></div>
                 <div class="dash-v3-net-charts">
                   <div class="dash-v3-net-chart-item">
-                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.memoryHistory.slice(-20), '#22c55e')}</div>
+                    <div id="dashboard-download-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e')}</div>
                     <span class="dash-v3-net-chart-label">下载</span>
                   </div>
                   <div class="dash-v3-net-chart-item">
-                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.diskHistory.slice(-20), '#3b82f6')}</div>
+                    <div id="dashboard-upload-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6')}</div>
                     <span class="dash-v3-net-chart-label">上传</span>
                   </div>
                   <div class="dash-v3-net-chart-item">
-                    <div class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.memoryHistory.slice(-20), '#f59e0b')}</div>
+                    <div id="dashboard-latency-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b')}</div>
                     <span class="dash-v3-net-chart-label">响应</span>
                   </div>
                 </div>
@@ -245,34 +253,34 @@ export class DashboardRenderer {
           <div class="dash-v3-card dash-v3-card-wide">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">内存使用率</span>
-              <span class="dash-v3-card-value">${memUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+              <span id="dashboard-memory-card-value" class="dash-v3-card-value">${snapshot.memUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
             </div>
             <div class="dash-v3-card-body dash-v3-chart-body">
               <div class="dash-v3-line-chart-grid" id="chart-memory">
                 ${this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4')}
               </div>
-              ${this.renderUsageBlocks(memUsage, '#06b6d4')}
+              <div id="dashboard-memory-usage-strip">${this.renderUsageBlocks(snapshot.memUsage, '#06b6d4')}</div>
             </div>
             <div class="dash-v3-card-footer">
-              <span>已用 ${systemInfo.memoryUsage.used}</span>
-              <span>总计 ${systemInfo.memoryUsage.total}</span>
+              <span id="dashboard-memory-used">已用 ${systemInfo.memoryUsage.used}</span>
+              <span id="dashboard-memory-total">总计 ${systemInfo.memoryUsage.total}</span>
             </div>
           </div>
 
           <div class="dash-v3-card dash-v3-card-wide">
             <div class="dash-v3-card-header">
               <span class="dash-v3-card-title">磁盘使用率</span>
-              <span class="dash-v3-card-value">${diskUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
+              <span id="dashboard-disk-trend-card-value" class="dash-v3-card-value">${snapshot.diskUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span></span>
             </div>
             <div class="dash-v3-card-body dash-v3-chart-body">
               <div class="dash-v3-line-chart-grid" id="chart-disk-trend">
                 ${this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444')}
               </div>
-              ${this.renderUsageBlocks(diskUsage, '#ef4444')}
+              <div id="dashboard-disk-usage-strip">${this.renderUsageBlocks(snapshot.diskUsage, '#ef4444')}</div>
             </div>
             <div class="dash-v3-card-footer">
-              <span>已用 ${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
-              <span>可用 ${systemInfo.diskUsage.available}</span>
+              <span id="dashboard-disk-used">已用 ${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}</span>
+              <span id="dashboard-disk-free">可用 ${systemInfo.diskUsage.available}</span>
             </div>
           </div>
         </div>
@@ -374,77 +382,108 @@ export class DashboardRenderer {
     return `<div class="dash-v3-usage-strip" aria-hidden="true">${blocks}</div>`;
   }
 
-  private renderMiniLineChart(points: number[], color: string): string {
-    if (!points.length) return '';
-    const width = 400;
-    const chartHeight = 80;
-    const indicatorHeight = 20;
-    const height = chartHeight + indicatorHeight + 10;
-    
-    const baseline = 50;
-    
-    const displayPoints = points.length === 1 ? [points[0], points[0]] : points;
-    
-    const min = Math.min(...displayPoints);
-    const max = Math.max(...displayPoints);
-    
-    const latestValue = displayPoints[displayPoints.length - 1];
-    
-    let yAxisMin: number;
-    let yAxisMax: number;
-    
-    if (min >= baseline) {
-      yAxisMin = baseline;
-      yAxisMax = 100;
-    } else if (max <= baseline) {
-      yAxisMin = 0;
-      yAxisMax = baseline;
-    } else {
-      yAxisMin = 0;
-      yAxisMax = 100;
+  private getLiveSnapshot(systemInfo: SystemInfo): DashboardLiveSnapshot {
+    const sampleTime = new Date(systemInfo.lastUpdate).getTime();
+    if (this.lastSnapshot && sampleTime === this.lastSnapshotTime) {
+      return this.lastSnapshot;
     }
-    
-    const range = yAxisMax - yAxisMin;
-    const stepX = width / Math.max(1, displayPoints.length - 1);
-    
-    const baselineY = chartHeight - ((baseline - yAxisMin) / range) * (chartHeight - 10) - 5;
-    
-    const coords = displayPoints.map((p, i) => {
-      const x = i * stepX;
-      const y = chartHeight - ((p - yAxisMin) / range) * (chartHeight - 10) - 5;
-      return `${x},${y}`;
-    });
-    
-    const areaPath = `M0,${chartHeight} L${coords.join(' L')} L${width},${chartHeight} Z`;
-    const linePath = `M${coords.join(' L')}`;
-    
-    const indicatorRects = Array.from({ length: 10 }, (_, i) => {
-      const rectWidth = 28;
-      const rectHeight = 10;
-      const rectX = i * (rectWidth + 10) + 20;
-      const rectY = chartHeight + 5;
-      const threshold = (i + 1) * 10;
-      const isActive = latestValue >= threshold;
-      const fill = isActive ? color : 'rgba(255,255,255,0.1)';
-      const rx = 4;
-      
-      return `<rect x="${rectX}" y="${rectY}" width="${rectWidth}" height="${rectHeight}" rx="${rx}" fill="${fill}" />`;
-    }).join('\n');
-    
-    return `
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:100%;">
-        <defs>
-          <linearGradient id="grad-${color.replace('#', '')}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
-            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <line x1="0" y1="${baselineY}" x2="${width}" y2="${baselineY}" stroke="rgba(255,255,255,0.2)" stroke-width="1" stroke-dasharray="4,4"/>
-        <path d="${areaPath}" fill="url(#grad-${color.replace('#', '')})" />
-        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        ${indicatorRects}
-      </svg>
-    `;
+
+    const cpuUsage = parseFloat(this.getCpuUsage(systemInfo));
+    const memUsage = parseFloat(this.getMemoryUsage(systemInfo));
+    const diskUsage = parseFloat(this.getDiskUsage(systemInfo));
+    const loadAvg = systemInfo.loadAverage || ['0', '0', '0'];
+    const load1 = parseFloat(loadAvg[0]) || 0;
+    const load5 = parseFloat(loadAvg[1]) || 0;
+    const load15 = parseFloat(loadAvg[2]) || 0;
+    const cores = systemInfo.cpuInfo.cores || 1;
+    const loadPercent = Math.min((load5 / cores) * 100, 100);
+    const rxBytes = Number(systemInfo.networkInfo?.rxBytes || 0);
+    const txBytes = Number(systemInfo.networkInfo?.txBytes || 0);
+
+    let downloadRate = 0;
+    let uploadRate = 0;
+    if (this.lastTrafficSample && sampleTime > this.lastTrafficSample.time) {
+      const elapsedSeconds = (sampleTime - this.lastTrafficSample.time) / 1000;
+      if (elapsedSeconds > 0) {
+        downloadRate = Math.max(0, (rxBytes - this.lastTrafficSample.rxBytes) / elapsedSeconds);
+        uploadRate = Math.max(0, (txBytes - this.lastTrafficSample.txBytes) / elapsedSeconds);
+      }
+    }
+    this.lastTrafficSample = { time: sampleTime, rxBytes, txBytes };
+
+    const latencyRaw = systemInfo.networkInfo?.latencyMs;
+    const latencyMs = typeof latencyRaw === 'number' && Number.isFinite(latencyRaw) ? latencyRaw : null;
+
+    this.pushHistory(this.cpuHistory, cpuUsage);
+    this.pushHistory(this.memoryHistory, memUsage);
+    this.pushHistory(this.diskHistory, diskUsage);
+    this.pushHistory(this.downloadHistory, downloadRate);
+    this.pushHistory(this.uploadHistory, uploadRate);
+    this.pushHistory(this.latencyHistory, latencyMs ?? 0);
+
+    const snapshot: DashboardLiveSnapshot = {
+      cpuUsage,
+      memUsage,
+      diskUsage,
+      load1,
+      load5,
+      load15,
+      loadPercent,
+      downloadRate,
+      uploadRate,
+      latencyMs
+    };
+    this.lastSnapshotTime = sampleTime;
+    this.lastSnapshot = snapshot;
+    return snapshot;
+  }
+
+  private pushHistory(history: number[], value: number): void {
+    history.push(Number.isFinite(value) ? value : 0);
+    while (history.length > DashboardRenderer.HISTORY_MAX) history.shift();
+  }
+
+  private formatRate(bytesPerSecond: number): string {
+    if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+      return '0 B/s';
+    }
+    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    let value = bytesPerSecond;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    const precision = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(precision)} ${units[index]}`;
+  }
+
+  private formatLatency(latencyMs: number | null): string {
+    if (latencyMs === null || !Number.isFinite(latencyMs)) {
+      return '--';
+    }
+    return `${latencyMs.toFixed(latencyMs >= 100 ? 0 : 1)} ms`;
+  }
+
+  private setText(id: string, value: string): void {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = value;
+    }
+  }
+
+  private setHtml(id: string, value: string): void {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = value;
+    }
+  }
+
+  private setRingValue(id: string, value: number): void {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.setProperty('--ring-value', String(Math.max(0, Math.min(100, value))));
+    }
   }
 
   /**
@@ -643,22 +682,60 @@ export class DashboardRenderer {
   }
 
   updateMetricCards(systemInfo: SystemInfo): void {
-    const memUsage = parseFloat(this.getMemoryUsage(systemInfo));
-    const diskUsage = parseFloat(this.getDiskUsage(systemInfo));
+    const snapshot = this.getLiveSnapshot(systemInfo);
+    const loadAvg = systemInfo.loadAverage || ['0', '0', '0'];
 
-    this.memoryHistory.push(memUsage);
-    this.diskHistory.push(diskUsage);
-    while (this.memoryHistory.length > DashboardRenderer.HISTORY_MAX) this.memoryHistory.shift();
-    while (this.diskHistory.length > DashboardRenderer.HISTORY_MAX) this.diskHistory.shift();
+    this.setText('dashboard-last-update', `最后更新: ${this.formatTime(systemInfo.lastUpdate)}`);
+    this.setText('dashboard-hostname-value', systemInfo.hostname);
+    this.setText('dashboard-memory-total-value', systemInfo.memoryUsage.total);
+    this.setText('dashboard-cpu-model-value', systemInfo.cpuInfo.model);
+    this.setText('dashboard-disk-total-value', systemInfo.diskUsage.total);
+    this.setText('dashboard-cpu-cores-value', String(systemInfo.cpuInfo.cores));
+    this.setText('dashboard-uptime-value', systemInfo.uptime);
+
+    this.setHtml('dashboard-cpu-card-value', `${snapshot.cpuUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span>`);
+    this.setHtml('dashboard-cpu-ring-value', `${snapshot.cpuUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span>`);
+    this.setRingValue('dashboard-cpu-ring', snapshot.cpuUsage);
+    this.setHtml('dashboard-cpu-mini-bars', this.renderMiniBarChart(this.cpuHistory.slice(-10), '#3b82f6'));
+
+    this.setText('dashboard-disk-card-value', `${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}`);
+    this.setHtml('dashboard-disk-ring-value', `${snapshot.diskUsage.toFixed(0)}<span class="dash-v3-ring-unit">%</span>`);
+    this.setRingValue('dashboard-disk-ring', snapshot.diskUsage);
+    this.setText('dashboard-disk-available', `可用 ${systemInfo.diskUsage.available}`);
+    this.setText('dashboard-partition-count', `${systemInfo.partitions.length} 分区`);
+
+    this.setText('dashboard-load-card-value', loadAvg.slice(0, 3).join(' / '));
+    this.setHtml('dashboard-load-ring-value', `${snapshot.loadPercent.toFixed(0)}<span class="dash-v3-ring-unit">%</span>`);
+    this.setRingValue('dashboard-load-ring', snapshot.loadPercent);
+    this.setText('dashboard-load-1', `1分钟 ${snapshot.load1.toFixed(2)}`);
+    this.setText('dashboard-load-15', `15分钟 ${snapshot.load15.toFixed(2)}`);
+
+    this.setHtml('dashboard-network-connections', `${systemInfo.networkConnections}<span class="dash-v3-card-unit"> 连接</span>`);
+    this.setText('dashboard-upload-rate', this.formatRate(snapshot.uploadRate));
+    this.setText('dashboard-download-rate', this.formatRate(snapshot.downloadRate));
+    this.setText('dashboard-latency-value', this.formatLatency(snapshot.latencyMs));
+    this.setHtml('dashboard-download-chart', this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e'));
+    this.setHtml('dashboard-upload-chart', this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6'));
+    this.setHtml('dashboard-latency-chart', this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b'));
+
+    this.setHtml('dashboard-memory-card-value', `${snapshot.memUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span>`);
+    this.setHtml('dashboard-memory-used', `已用 ${systemInfo.memoryUsage.used}`);
+    this.setHtml('dashboard-memory-total', `总计 ${systemInfo.memoryUsage.total}`);
+    this.setHtml('dashboard-memory-usage-strip', this.renderUsageBlocks(snapshot.memUsage, '#06b6d4'));
 
     const memEl = document.querySelector('#chart-memory');
     if (memEl) {
-      memEl.innerHTML = this.renderMiniLineChart(this.memoryHistory.slice(-10), '#06b6d4');
+      memEl.innerHTML = this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4');
     }
+
+    this.setHtml('dashboard-disk-trend-card-value', `${snapshot.diskUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span>`);
+    this.setHtml('dashboard-disk-used', `已用 ${systemInfo.diskUsage.used} / ${systemInfo.diskUsage.total}`);
+    this.setHtml('dashboard-disk-free', `可用 ${systemInfo.diskUsage.available}`);
+    this.setHtml('dashboard-disk-usage-strip', this.renderUsageBlocks(snapshot.diskUsage, '#ef4444'));
 
     const diskEl = document.querySelector('#chart-disk-trend');
     if (diskEl) {
-      diskEl.innerHTML = this.renderMiniLineChart(this.diskHistory.slice(-10), '#f97316');
+      diskEl.innerHTML = this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444');
     }
   }
 

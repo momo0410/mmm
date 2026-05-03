@@ -112,17 +112,20 @@
         </button>
         <button
           v-if="state.viewMode === 'list'"
-          class="payloader-btn payloader-btn--pentest"
-          @click="openPentestModal"
-          :disabled="agentRunning"
-          title="智能分析"
+          :class="['payloader-btn', 'payloader-btn--pentest', { 'is-running': agentRunning }]"
+          @click="handlePentestEntry"
+          :title="agentRunning ? `继续查看任务：${pentestTarget || '当前目标'}` : '智能分析'"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
             <path d="M2 17l10 5 10-5"></path>
             <path d="M2 12l10 5 10-5"></path>
           </svg>
-          智能分析
+          {{ agentRunning ? '继续任务' : '智能分析' }}
+          <span v-if="agentRunning" class="payloader-btn-running-badge">
+            <span class="payloader-btn-running-dot"></span>
+            运行中
+          </span>
         </button>
         <button 
           v-if="state.viewMode === 'list'"
@@ -255,6 +258,7 @@
                   <span class="payloader-agent-current-action-text">{{ currentActionSummary }}</span>
                   <span v-if="currentActionElapsed" class="payloader-agent-current-action-elapsed">{{ currentActionElapsed }}</span>
                 </div>
+                <pre v-if="currentPlanningStream" class="payloader-agent-planning-stream">{{ currentPlanningStream }}</pre>
                 <div class="payloader-agent-live-log payloader-agent-live-log--compact">
                   <div class="payloader-agent-live-log-header">
                     <h4>执行摘要</h4>
@@ -264,7 +268,7 @@
                   <div v-if="compactActionItems.length > 0" class="payloader-agent-compact-list">
                     <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item" :class="{ 'payloader-agent-action-running': action.status === 'running' }">
                       <div class="payloader-agent-compact-top">
-                        <span class="payloader-agent-action-tool" :class="{ 'payloader-agent-action-tool-active': action.status === 'running' }">{{ action.tool }}</span>
+                        <span class="payloader-agent-action-tool" :class="{ 'payloader-agent-action-tool-active': action.status === 'running' }">{{ formatActionToolLabel(action.tool) }}</span>
                         <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
                         <span v-if="action.status === 'running'" class="payloader-agent-action-status-running">执行中</span>
                       </div>
@@ -320,7 +324,7 @@
                 <div class="payloader-agent-compact-list">
                   <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item">
                     <div class="payloader-agent-compact-top">
-                      <span class="payloader-agent-action-tool">{{ action.tool }}</span>
+                      <span class="payloader-agent-action-tool">{{ formatActionToolLabel(action.tool) }}</span>
                       <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
                     </div>
                     <div class="payloader-agent-compact-line">
@@ -599,7 +603,7 @@
               <div v-for="(log, actionIdx) in round.actions" :key="log.id || `${round.key}-${actionIdx}`" class="payloader-log-entry">
                 <div class="payloader-log-meta">
                   <span v-if="log.task_label" class="payloader-log-task">{{ log.task_label }}</span>
-                  <span class="payloader-log-tool">{{ log.tool }}</span>
+                  <span class="payloader-log-tool">{{ formatActionToolLabel(log.tool) }}</span>
                   <span v-if="log.surface" class="payloader-log-surface">{{ log.surface }}</span>
                   <span :class="['payloader-log-status', `payloader-log-status--${log.status || 'completed'}`]">
                     {{ getLogStatusLabel(log.status) }}
@@ -946,7 +950,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import PayloaderToolbar from './components/PayloaderToolbar.vue';
 import PayloaderContent from './components/PayloaderContent.vue';
 import EncodingTools from './components/EncodingTools.vue';
@@ -1183,6 +1187,15 @@ function openPentestModal() {
   showPentestModal.value = true;
 }
 
+function handlePentestEntry() {
+  pentestModalError.value = '';
+  if (agentRunning.value && currentTaskId.value) {
+    showResultModal.value = true;
+    return;
+  }
+  openPentestModal();
+}
+
 function closePentestModal() {
   pentestModalError.value = '';
   showPentestModal.value = false;
@@ -1278,6 +1291,22 @@ function getPhaseLabel(phase: string | undefined) {
   }
 }
 
+function formatActionToolLabel(tool?: string) {
+  const toolLabel: Record<string, string> = {
+    _llm_wait: 'AI 规划',
+    nmap: '端口扫描',
+    msfconsole: '漏洞利用',
+    hydra: '密码爆破',
+    shell: '命令执行',
+    searchsploit: '漏洞搜索',
+    nuclei: '漏洞扫描',
+    sqlmap: 'SQL注入检测',
+    ffuf: '目录扫描',
+    nikto: 'Web扫描',
+  };
+  return toolLabel[String(tool || '')] || String(tool || 'unknown');
+}
+
 const currentActionSummary = computed(() => {
   if (!agentResult.value?.actions?.length) return '';
   const latest = agentResult.value.actions[agentResult.value.actions.length - 1];
@@ -1286,21 +1315,19 @@ const currentActionSummary = computed(() => {
     return 'AI 正在分析当前态势，规划下一步操作...';
   }
   if (latest.status === 'running') {
-    const toolLabel: Record<string, string> = {
-      nmap: '端口扫描',
-      msfconsole: '漏洞利用',
-      hydra: '密码爆破',
-      shell: '命令执行',
-      searchsploit: '漏洞搜索',
-      nuclei: '漏洞扫描',
-      sqlmap: 'SQL注入检测',
-      ffuf: '目录扫描',
-      nikto: 'Web扫描',
-    };
-    const label = toolLabel[latest.tool] || latest.tool;
+    const label = formatActionToolLabel(latest.tool);
     return `正在执行: ${label}`;
   }
   return '';
+});
+
+const currentPlanningStream = computed(() => {
+  if (!agentResult.value?.actions?.length) return '';
+  const latest = agentResult.value.actions[agentResult.value.actions.length - 1];
+  if (!latest || latest.tool !== '_llm_wait') {
+    return '';
+  }
+  return formatActionPayload(latest.result || latest.full_stdout, '');
 });
 
 const currentActionElapsed = ref('');
@@ -1563,9 +1590,7 @@ async function resolvePentestFinalReport(params: {
     ]);
     backendReport = String(report?.report || '').trim();
     finalPhase = report?.phase || params.phase;
-    normalizedLogs = (logs?.actions || [])
-      .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
-      .map((item: any) => normalizeLogEntry(item));
+    normalizedLogs = (logs?.actions || []).map((item: any) => normalizeLogEntry(item));
   } catch {
     // ignore and use fallback
   }
@@ -1591,9 +1616,7 @@ async function buildInterruptedPentestSummary(taskId: string) {
 
   const status = statusResult.status === 'fulfilled' ? statusResult.value : null;
   const rawLogs = logResult.status === 'fulfilled' ? (logResult.value.actions || []) : [];
-  const normalizedLogs = rawLogs
-    .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
-    .map((item: any) => normalizeLogEntry(item));
+  const normalizedLogs = rawLogs.map((item: any) => normalizeLogEntry(item));
 
   const phase = status?.phase || logPhase.value || agentResult.value?.phase || 'init';
   const findingsCount = status?.findings_count ?? agentResult.value?.findings_count ?? 0;
@@ -1742,6 +1765,43 @@ async function startHostAgent() {
   }
 }
 
+async function restoreRunningPentestTask() {
+  try {
+    const pythonApi = (await import('../../config/python-api.config')).default;
+    const historyRes = await pythonApi.pentestHistory();
+    const runningTask = (historyRes.history || []).find((item: any) => item?.status === 'running');
+
+    if (!runningTask?.task_id) {
+      return;
+    }
+
+    const status = await pythonApi.pentestStatus(runningTask.task_id);
+    if (!status?.running) {
+      return;
+    }
+
+    currentTaskId.value = runningTask.task_id;
+    pentestTarget.value = runningTask.target || status.targets?.[0] || '';
+    agentRunning.value = true;
+    agentError.value = '';
+    agentResult.value = {
+      phase: status.phase,
+      targets: status.targets,
+      findings_count: status.findings_count,
+      vuln_count: status.vuln_count,
+      actions_count: status.actions_count,
+      actions: status.actions,
+    };
+
+    if (statusTimer) {
+      clearInterval(statusTimer);
+    }
+    statusTimer = setInterval(pollStatus, 2000);
+  } catch (err) {
+    console.error('恢复后台渗透任务失败:', err);
+  }
+}
+
 async function pollStatus() {
   if (!currentTaskId.value) return;
   try {
@@ -1868,6 +1928,9 @@ const logRounds = computed<PentestLogRound[]>(() => {
   const groupIndex = new Map<string, number>();
 
   logData.value.forEach((log, index) => {
+    const streamingDecision = log.tool === '_llm_wait'
+      ? formatActionPayload(log.result || log.full_stdout, log.llm_decision)
+      : log.llm_decision;
     const round = typeof log.round === 'number' ? log.round : null;
     const key = round !== null ? `round-${round}` : `single-${log.id || index}`;
     let group = groupIndex.has(key) ? groups[groupIndex.get(key)!] : undefined;
@@ -1877,15 +1940,15 @@ const logRounds = computed<PentestLogRound[]>(() => {
         key,
         round,
         time: log.time,
-        llm_decision: log.llm_decision,
+        llm_decision: streamingDecision,
         actions: [],
       };
       groupIndex.set(key, groups.length);
       groups.push(group);
     }
 
-    if (!group.llm_decision && log.llm_decision) {
-      group.llm_decision = log.llm_decision;
+    if (!group.llm_decision && streamingDecision) {
+      group.llm_decision = streamingDecision;
     }
     if (!group.time && log.time) {
       group.time = log.time;
@@ -1954,9 +2017,7 @@ async function loadLogs(taskId?: string, silent = false) {
     const pythonApi = (await import('../../config/python-api.config')).default;
     const res = await pythonApi.pentestLogs(tid);
     logPhase.value = res.phase || 'init';
-    logData.value = (res.actions || [])
-      .filter((item: any) => String(item?.tool || '') !== '_llm_wait')
-      .map(normalizeLogEntry);
+    logData.value = (res.actions || []).map(normalizeLogEntry);
   } catch (err: any) {
     console.error('加载日志失败:', err);
     logError.value = err?.message || '加载日志失败';
@@ -2018,6 +2079,10 @@ onUnmounted(() => {
     statusTimer = null;
   }
   stopLogPolling();
+});
+
+onMounted(() => {
+  void restoreRunningPentestTask();
 });
 </script>
 
@@ -2823,9 +2888,72 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
 }
 
+.payloader-btn--pentest.is-running {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(16, 185, 129, 0.18));
+  border-color: rgba(59, 130, 246, 0.35);
+  color: var(--text-primary);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+.payloader-btn--pentest.is-running:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.24), rgba(16, 185, 129, 0.24));
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 14px 32px rgba(59, 130, 246, 0.2);
+}
+
+.payloader-btn-running-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--primary-color);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.payloader-btn-running-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+  animation: payloader-running-pulse 1.6s ease-in-out infinite;
+}
+
 .payloader-btn--pentest:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.payloader-agent-planning-stream {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03));
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+@keyframes payloader-running-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.78;
+  }
 }
 
 /* 工具和编解码按钮样式 */

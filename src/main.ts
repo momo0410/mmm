@@ -3663,7 +3663,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
   (window as any).startDashboardAutoRefresh = () => {
     (window as any).stopDashboardAutoRefresh();
 
-    console.log('🔄 启动仪表盘自动刷新（仅摘要数据，每 30 秒）');
+    console.log('🔄 启动仪表盘自动刷新（仅摘要数据，每 5 秒）');
 
     dashboardRefreshInterval = window.setInterval(async () => {
       const app = (window as any).app;
@@ -3672,8 +3672,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
         console.log('🔄 仪表盘自动刷新（摘要 + 局部更新）');
         try {
           if (app && app.sshManager) {
-            // 1. 获取摘要数据（带缓存和去重）
-            await app.sshManager.fetchSystemSummary();
+            // 1. 获取摘要数据（自动刷新时强制拉取，避免 5 秒轮询被缓存吞掉）
+            await app.sshManager.fetchSystemSummary(true);
             
             // 2. 从缓存读取最新数据
             const summary = app.sshManager.getCachedSummary?.();
@@ -3708,7 +3708,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
       } else {
         (window as any).stopDashboardAutoRefresh();
       }
-    }, 30000);
+    }, 5000);
   };
 
   // 停止仪表盘自动刷新
