@@ -4250,11 +4250,13 @@ body,
 }
 
 .dash-v3-row-charts {
+  flex: 1.2 1 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   min-height: 260px;
 }
 
 .dash-v3-row-lines {
+  flex: 1 1 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 220px;
 }
