@@ -223,8 +223,8 @@ export class SDITApp {
   /**
    * 切换页面（保留 DOM 状态）
    */
-  switchToPage(pageId: string): void {
-    this.stateManager.setCurrentPage(pageId as any);
+  switchToPage(pageId: AppPage): void {
+    this.stateManager.setCurrentPage(pageId);
     this.modernUIRenderer.updateState(this.stateManager.getState());
     this.modernUIRenderer.switchToPage(pageId);
     this.updateNavActiveState(pageId);
@@ -268,11 +268,12 @@ export class SDITApp {
       if (navItem && navItem.getAttribute('data-nav-id')) {
         const navId = navItem.getAttribute('data-nav-id');
         if (navId) {
+            const pageId = navId as AppPage;
             this.modernUIRenderer.hideMiniSidebarTooltip();
-            this.stateManager.setCurrentPage(navId as any);
+            this.stateManager.setCurrentPage(pageId);
             this.modernUIRenderer.updateState(this.stateManager.getState());
-            this.modernUIRenderer.switchToPage(navId);
-            this.updateNavActiveState(navId);
+            this.modernUIRenderer.switchToPage(pageId);
+            this.updateNavActiveState(pageId);
         }
       }
       // 点击外部关闭下拉菜单

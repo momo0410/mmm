@@ -14,7 +14,6 @@ import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { SftpContextMenuRenderer } from './sftpContextMenu';
 import { LogAnalysisRenderer } from './logAnalysisRenderer';
 import { DatabaseRenderer } from './databaseRenderer';
-import { emergencyCategories } from '../emergency/commands';
 import {
   List,
   Peoples,
@@ -33,13 +32,7 @@ import {
   Connection,
   User,
   Key,
-  Up,
-  Home,
   Refresh,
-  Upload,
-  FolderPlus,
-  Download,
-  History,
   Lock,
   Shield,
   Analysis,
@@ -69,6 +62,14 @@ import {
   getNavigationItemsForMode,
   type IconKey
 } from './navigationConfig';
+import { renderWorkspaceShell, renderPageContainer } from './layout/workspaceShell';
+import { renderDashboardPage } from './pages/dashboardPage';
+import { renderEmergencyCommandsPage } from './pages/emergencyCommandsPage';
+import { getPageDefinitionMap, type PageDefinition } from './pages/pageRegistry';
+import { renderQuickDetectionPage } from './pages/quickDetectionPage';
+import { renderRemoteOperationsPage } from './pages/remoteOperationsPage';
+import { renderSystemInfoPage } from './pages/systemInfoPage';
+import type { AppPage } from './pageTypes';
 
 const ICON_MAP: Record<IconKey, any> = {
   Dashboard,
@@ -120,7 +121,7 @@ export class ModernUIRenderer {
   public sftpContextMenuRenderer: SftpContextMenuRenderer;
   public databaseRenderer: DatabaseRenderer;
   private pageContainersRendered: boolean = false;
-  private currentVisiblePage: string = 'dashboard';
+  private currentVisiblePage: AppPage = 'dashboard';
   private pageInitialized: Set<string> = new Set();
 
   constructor(stateManager: StateManager) {
@@ -862,44 +863,23 @@ export class ModernUIRenderer {
     if (this.state.loading) {
       this.pageContainersRendered = false;
       this.pageInitialized.clear();
-      return `
-        <div class="main-workspace">
-          <div class="workspace-content page-transition" id="workspace-content">
-            ${this.renderLoadingState()}
-          </div>
-        </div>
-      `;
+      return renderWorkspaceShell(this.renderLoadingState());
     }
 
     if (!this.state.isConnected) {
       this.pageContainersRendered = false;
       this.pageInitialized.clear();
-      return `
-        <div class="main-workspace">
-          <div class="workspace-content page-transition" id="workspace-content">
-            ${this.renderConnectionPrompt()}
-          </div>
-        </div>
-      `;
+      return renderWorkspaceShell(this.renderConnectionPrompt());
     }
 
     this.currentVisiblePage = this.state.currentPage;
     this.pageContainersRendered = true;
 
-    const containers = ALL_PAGE_IDS.map(pageId => {
-      const display = pageId === this.state.currentPage ? 'block' : 'none';
-      return `<div class="page-container" id="page-${pageId}" style="display:${display}">
-        ${this.getPageHTML(pageId)}
-      </div>`;
-    }).join('');
+    const containers = ALL_PAGE_IDS.map(pageId =>
+      renderPageContainer(pageId, this.getPageHTML(pageId), pageId === this.state.currentPage)
+    ).join('');
 
-    return `
-      <div class="main-workspace">
-        <div class="workspace-content page-transition" id="workspace-content">
-          ${containers}
-        </div>
-      </div>
-    `;
+    return renderWorkspaceShell(containers);
   }
 
   /**
@@ -919,7 +899,7 @@ export class ModernUIRenderer {
   /**
    * 切换页面（仅切换 display，不重建 DOM）
    */
-  switchToPage(pageId: string): void {
+  switchToPage(pageId: AppPage): void {
     if (!this.pageContainersRendered) {
       return;
     }
@@ -947,7 +927,7 @@ export class ModernUIRenderer {
   /**
    * 刷新单个页面的容器内容（保留容器外层，只替换内部 HTML）
    */
-  refreshPageContainer(pageId: string): void {
+  refreshPageContainer(pageId: AppPage): void {
     if (!this.pageContainersRendered) {
       return;
     }
@@ -961,7 +941,7 @@ export class ModernUIRenderer {
   /**
    * 页面激活钩子
    */
-  private onPageActivated(pageId: string): void {
+  private onPageActivated(pageId: AppPage): void {
     switch (pageId) {
       case 'dashboard':
         setTimeout(() => {
@@ -1036,7 +1016,7 @@ export class ModernUIRenderer {
   /**
    * 页面失活钩子
    */
-  private onPageDeactivated(pageId: string): void {
+  private onPageDeactivated(pageId: AppPage): void {
     this.savePageUIState(pageId);
 
     switch (pageId) {
@@ -1054,7 +1034,7 @@ export class ModernUIRenderer {
     }
   }
 
-  private savePageUIState(pageId: string): void {
+  private savePageUIState(pageId: AppPage): void {
     const container = document.getElementById(`page-${pageId}`);
     if (!container) return;
 
@@ -1091,29 +1071,23 @@ export class ModernUIRenderer {
   /**
    * 获取指定页面的 HTML 内容
    */
-  getPageHTML(pageId: string): string {
-    switch (pageId) {
-      case 'dashboard':
-        return this.renderDashboard();
-      case 'system-info':
-        return this.renderSystemInfo();
-      case 'ssh-terminal':
-        return this.renderSSHTerminalRedirect();
-      case 'remote-operations':
-        return this.renderRemoteOperationsPage();
-      case 'emergency-commands':
-        return this.renderEmergencyCommandsPage();
-      case 'quick-detection':
-        return this.renderQuickDetectionPage();
-      case 'database':
-        return this.databaseRenderer.render();
-      case 'log-analysis':
-        return this.logAnalysisRenderer.render();
-      case 'payloader':
-        return this.renderPayloaderPage();
-      default:
-        return this.renderDashboard();
-    }
+  getPageHTML(pageId: AppPage): string {
+    const page = this.getPageDefinitions()[pageId];
+    return page ? page.render() : this.renderDashboard();
+  }
+
+  private getPageDefinitions(): Record<AppPage, PageDefinition> {
+    return getPageDefinitionMap([
+      { id: 'dashboard', render: () => this.renderDashboard() },
+      { id: 'system-info', render: () => this.renderSystemInfo() },
+      { id: 'ssh-terminal', render: () => this.renderSSHTerminalRedirect() },
+      { id: 'remote-operations', render: () => this.renderRemoteOperationsPage() },
+      { id: 'emergency-commands', render: () => this.renderEmergencyCommandsPage() },
+      { id: 'quick-detection', render: () => this.renderQuickDetectionPage() },
+      { id: 'database', render: () => this.databaseRenderer.render() },
+      { id: 'log-analysis', render: () => this.logAnalysisRenderer.render() },
+      { id: 'payloader', render: () => this.renderPayloaderPage() }
+    ]);
   }
 
 
@@ -1217,84 +1191,11 @@ export class ModernUIRenderer {
    */
   private renderSystemInfo(): string {
     const { counts, knownTabs } = this.getSystemInfoTabCounts();
-    const renderCountBadge = (key: keyof typeof counts): string => {
-      return counts[key] > 0 || knownTabs.has(key)
-        ? `<span class="count-badge">${counts[key]}</span>`
-        : '';
-    };
-
-    // 读取折叠状态
-    const isCollapsed = localStorage.getItem('system-info-header-collapsed') === 'true';
-    const collapsedClass = isCollapsed ? 'collapsed' : '';
-    const contentExpandedClass = isCollapsed ? 'expanded' : '';
-    const toggleIcon = isCollapsed 
-      ? Right({ theme: 'outline', size: '16', fill: 'currentColor' })
-      : Left({ theme: 'outline', size: '16', fill: 'currentColor' });
-
-    return `
-      <div class="system-info-container">
-        <div class="system-info-sidebar-wrapper">
-          <div class="system-info-header ${collapsedClass}">
-            <div class="system-info-menu-title">
-              <span>系统概览</span>
-            </div>
-
-            <div class="system-info-tabs">
-              <button class="tab-btn active" data-tab="processes">
-                <span class="tab-icon">${List({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">进程详情</span>
-                ${renderCountBadge('processes')}
-              </button>
-              <button class="tab-btn" data-tab="network">
-                <span class="tab-icon">${Earth({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">网络详情</span>
-                ${renderCountBadge('network')}
-              </button>
-              <button class="tab-btn" data-tab="services">
-                <span class="tab-icon">${System({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">系统服务</span>
-                ${renderCountBadge('services')}
-              </button>
-              <button class="tab-btn" data-tab="users">
-                <span class="tab-icon">${User({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">用户列表</span>
-                ${renderCountBadge('users')}
-              </button>
-              <button class="tab-btn" data-tab="autostart">
-                <span class="tab-icon">${Rocket({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">自启动</span>
-                ${renderCountBadge('autostart')}
-              </button>
-              <button class="tab-btn" data-tab="cron">
-                <span class="tab-icon">${Time({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">计划任务</span>
-                ${renderCountBadge('cron')}
-              </button>
-              <button class="tab-btn" data-tab="firewall">
-                <span class="tab-icon">${Shield({ theme: 'outline', size: '16', fill: 'currentColor' })}</span>
-                <span class="tab-label">防火墙</span>
-                ${renderCountBadge('firewall')}
-              </button>
-            </div>
-          </div>
-
-          <div class="system-info-actions-bottom">
-            <button class="refresh-btn" onclick="window.refreshAllSystemInfo()" title="刷新所有系统信息">
-              ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>刷新数据</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="header-toggle-btn" onclick="window.toggleSystemInfoHeader()" title="切换菜单">
-          <span class="header-toggle-icon">${toggleIcon}</span>
-        </div>
-
-        <div class="system-info-content ${contentExpandedClass}" id="system-info-content">
-          ${this.renderSystemInfoTab('processes')}
-        </div>
-      </div>
-    `;
+    return renderSystemInfoPage({
+      counts,
+      knownTabs,
+      renderInitialTab: () => this.renderSystemInfoTab('processes')
+    });
   }
 
   private getSystemInfoTabCounts(): {
@@ -2583,11 +2484,11 @@ export class ModernUIRenderer {
    * 渲染仪表板
    */
   private renderDashboard(): string {
-    // 获取系统信息（这里需要从应用状态或SSH管理器获取）
-    const systemInfo = this.getSystemInfo();
-    const theme = this.state.theme || 'dark';
-
-    return this.dashboardRenderer.renderDashboard(systemInfo, theme);
+    return renderDashboardPage({
+      dashboardRenderer: this.dashboardRenderer,
+      systemInfo: this.getSystemInfo(),
+      theme: this.state.theme
+    });
   }
 
   /**
@@ -2620,108 +2521,20 @@ export class ModernUIRenderer {
   private static remoteOperationsInitTimer: number | null = null;
 
   private renderRemoteOperationsPage(): string {
-    // 防止重复设置定时器
-    if (ModernUIRenderer.remoteOperationsInitTimer) {
-      clearTimeout(ModernUIRenderer.remoteOperationsInitTimer);
-    }
-
-    // 延迟初始化远程操作页面
-    ModernUIRenderer.remoteOperationsInitTimer = window.setTimeout(() => {
-      (window as any).initRemoteOperationsPage?.();
-      ModernUIRenderer.remoteOperationsInitTimer = null;
-    }, 100);
-
-    return `
-      <div class="sftp-page-container">
-        <!-- Header -->
-        <div class="sftp-header">
-          <div class="sftp-title">
-            <div class="sftp-title-icon">
-              <img src="/icons/sftp-file.png" alt="SFTP 文件管理" />
-            </div>
-            <span>SFTP 文件管理</span>
-          </div>
-          <div class="sftp-actions">
-            <button id="sftp-history-btn" class="modern-btn secondary" onclick="window.toggleSftpHistory && window.toggleSftpHistory()" title="传输历史">
-              ${History({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>历史</span>
-            </button>
-            <button id="sftp-refresh-btn" class="modern-btn secondary" onclick="window.sftpRefresh && window.sftpRefresh()" title="刷新列表">
-              ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>刷新</span>
-            </button>
-            <button id="sftp-create-folder-btn" class="modern-btn secondary" onclick="window.sftpOpenCreateFolder && window.sftpOpenCreateFolder()" title="新建文件夹">
-              ${FolderPlus({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>新建</span>
-            </button>
-            <button id="sftp-upload-btn" class="modern-btn primary" onclick="window.sftpOpenUpload && window.sftpOpenUpload()" title="上传文件">
-              ${Upload({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>上传</span>
-            </button>
-            <button id="sftp-download-btn" class="modern-btn secondary" onclick="window.sftpOpenDownload && window.sftpOpenDownload()" title="下载文件">
-              ${Download({ theme: 'outline', size: '16', fill: 'currentColor' })}
-              <span>下载</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Toolbar & Navigation -->
-        <div class="sftp-toolbar">
-          <div class="sftp-nav-controls">
-            <button class="modern-btn icon-only secondary" onclick="sftpManager.navigateToParent()" title="返回上一级">
-              ${Up({ theme: 'outline', size: '16', fill: 'currentColor' })}
-            </button>
-            <button class="modern-btn icon-only secondary" onclick="sftpManager.navigateToPath('/')" title="返回根目录">
-              ${Home({ theme: 'outline', size: '16', fill: 'currentColor' })}
-            </button>
-          </div>
-          
-          <div class="sftp-breadcrumb-bar">
-            <input
-              type="text"
-              id="sftp-path-input"
-              class="sftp-path-input"
-              placeholder="输入路径..."
-              onkeydown="if(event.key === 'Enter') sftpManager.navigateToPath(this.value)"
-            />
-          </div>
-        </div>
-
-        <!-- File List -->
-        <div class="sftp-file-list-container">
-          <table class="sftp-table">
-            <thead>
-              <tr>
-                <th style="width: 50%; cursor: pointer;" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'name-asc' ? 'name-desc' : 'name-asc')">
-                  名称
-                </th>
-                <th style="width: 15%; cursor: pointer;" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'size-asc' ? 'size-desc' : 'size-asc')">
-                  大小
-                </th>
-                <th style="width: 15%;">权限</th>
-                <th style="width: 20%; cursor: pointer;" onclick="window.setSftpSortMode(sftpManager.getSortMode() === 'modified-asc' ? 'modified-desc' : 'modified-asc')">
-                  修改时间
-                </th>
-              </tr>
-            </thead>
-            <tbody id="sftp-file-list">
-              ${sftpManager.renderFileListHTML()}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Status Bar -->
-        <div class="sftp-status-bar">
-          <div class="status-item" id="sftp-status-count">
-            <span>0 项</span>
-          </div>
-          <div class="status-item">
-            ${this.state.isConnected ? '<span style="color: var(--success-color);">● 已连接</span>' : '<span style="color: var(--error-color);">● 未连接</span>'}
-          </div>
-        </div>
-      </div>
-      ${this.sftpContextMenuRenderer.renderContextMenu()}
-    `;
+    return renderRemoteOperationsPage({
+      isConnected: this.state.isConnected,
+      fileListHtml: sftpManager.renderFileListHTML(),
+      contextMenuHtml: this.sftpContextMenuRenderer.renderContextMenu(),
+      scheduleInit: () => {
+        if (ModernUIRenderer.remoteOperationsInitTimer) {
+          clearTimeout(ModernUIRenderer.remoteOperationsInitTimer);
+        }
+        ModernUIRenderer.remoteOperationsInitTimer = window.setTimeout(() => {
+          (window as any).initRemoteOperationsPage?.();
+          ModernUIRenderer.remoteOperationsInitTimer = null;
+        }, 100);
+      }
+    });
   }
 
 
@@ -2730,36 +2543,6 @@ export class ModernUIRenderer {
    * 渲染应急命令页面
    */
   private renderEmergencyCommandsPage(): string {
-    const renderCategory = (cat: any) => {
-      const items = cat.items.map((item: any) => `
-          <button class="em-cmd-btn" data-em-id="${item.id}" title="${item.desc || ''}">
-            <div class="em-cmd-content">
-              <span class="em-cmd-name">${item.name}</span>
-              <span class="em-cmd-desc">${item.desc || '点击执行此命令'}</span>
-            </div>
-            <div class="em-cmd-icon">
-              <svg width="20" height="20" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14 12L26 24L14 36" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M26 36H42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-          </button>
-        `).join('');
-
-      return `
-      <div class="em-category-section">
-        <div class="em-category-header">
-          <h3 class="em-category-title">${cat.title}</h3>
-          ${cat.hint ? `<div class="em-category-hint">${cat.hint}</div>` : ''}
-        </div>
-        <div class="em-grid">
-          ${items}
-        </div>
-      </div>
-    `;
-    };
-
-    // 获取当前连接的账号列表
     const sshManager = (window as any).app?.sshManager;
     const sshConnectionManager = (window as any).sshConnectionManager;
     const currentConnectionId = sshConnectionManager?.getCurrentConnectionId?.();
@@ -2777,374 +2560,16 @@ export class ModernUIRenderer {
       }
     }
 
-    const body = emergencyCategories.map(renderCategory).join('');
-
-    return `
-      <div class="emergency-commands-page" style="display:flex; flex-direction:column; gap: var(--spacing-lg); min-height: 100%;">
-        <div class="em-header-container">
-          <div class="em-system-card">
-            <div class="em-system-icon">
-              <img src="/icons/command-execute.png" alt="检测到的系统" />
-            </div>
-            <div class="em-system-info">
-              <div class="em-system-label">检测到的系统</div>
-              <div id="detected-system-info" class="em-system-value">检测中...</div>
-            </div>
-          </div>
-
-          <div class="em-actions-card">
-            <div class="em-search-wrapper">
-               <svg width="16" height="16" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M21 38C30.3888 38 38 30.3888 38 21C38 11.6112 30.3888 4 21 4C11.6112 4 4 11.6112 4 21C4 30.3888 11.6112 38 21 38Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
-                  <path d="M33.2218 33.2218L41.7071 41.7071" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-               </svg>
-               <input type="text" class="em-search-input" placeholder="搜索命令..." oninput="window.emergencyPageManager?.handleSearch(this.value)">
-            </div>
-
-            <div class="em-account-select-wrapper">
-              <label style="font-size: 12px; color: var(--text-secondary); margin: 0;">执行账号:</label>
-              <select id="emergency-account-select" class="em-account-select" title="选择执行应急命令的账号">
-                ${accountsOptions}
-              </select>
-            </div>
-
-            <button id="view-command-history-btn" class="modern-btn primary" style="height: 36px;" onclick="(window).commandHistoryModal?.show()">
-              <svg width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px;">
-                <path d="M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
-                <path d="M24 12V24L32 32" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>查看命令历史</span>
-            </button>
-          </div>
-        </div>
-        ${body}
-      </div>
-    `;
+    return renderEmergencyCommandsPage({
+      accountsOptionsHtml: accountsOptions
+    });
   }
 
   /**
    * 渲染快速检测页面
    */
   private renderQuickDetectionPage(): string {
-    // 安全检测项目 - 使用 IconPark 图标
-    const securityChecks = [
-      // 基础安全检测
-      { id: 'port-scan', name: '端口安全扫描', description: '检测开放端口和高危服务', iconFunc: NetworkTree },
-      { id: 'user-audit', name: '用户权限审计', description: '检查用户权限和空密码账号', iconFunc: User },
-      { id: 'backdoor-scan', name: '后门检测', description: '扫描 Webshell 和计划任务', iconFunc: Code },
-      { id: 'process-analysis', name: '可疑进程分析', description: '识别异常进程和网络连接', iconFunc: Config },
-      { id: 'file-permission', name: '文件权限检测', description: '检查敏感文件和 SUID 文件', iconFunc: FileText },
-      { id: 'ssh-audit', name: 'SSH 安全审计', description: '检查 SSH 配置安全性', iconFunc: Lock },
-      { id: 'log-analysis', name: '日志安全分析', description: '分析异常登录和暴力破解', iconFunc: Analysis },
-      { id: 'firewall-check', name: '防火墙状态检查', description: '检查防火墙规则配置', iconFunc: Shield },
-
-      // 账号与认证安全
-      { id: 'password-policy', name: '密码策略检查', description: '检查密码复杂度和过期策略', iconFunc: Key },
-      { id: 'sudo-audit', name: 'Sudo 配置审计', description: '检查 sudo 权限配置安全性', iconFunc: Shield },
-      { id: 'pam-config', name: 'PAM 配置检查', description: '检查 PAM 认证配置', iconFunc: Lock },
-      { id: 'account-lockout', name: '账号锁定策略', description: '检查登录失败锁定机制', iconFunc: Lock },
-
-      // 系统加固
-      { id: 'selinux-status', name: 'SELinux/AppArmor', description: '检查强制访问控制状态', iconFunc: Shield },
-      { id: 'kernel-params', name: '内核参数检查', description: '检查安全相关内核参数', iconFunc: System },
-      { id: 'system-updates', name: '系统补丁状态', description: '检查系统更新和漏洞补丁', iconFunc: System },
-
-      // 服务与进程
-      { id: 'unnecessary-services', name: '不必要服务检查', description: '检测运行的不必要服务', iconFunc: SettingConfig },
-      { id: 'auto-start-services', name: '自启动服务审计', description: '审计开机自启动服务', iconFunc: SettingConfig },
-
-      // 审计与日志
-      { id: 'audit-config', name: '审计配置检查', description: '检查系统审计(auditd)配置', iconFunc: Analysis },
-      { id: 'history-audit', name: '历史命令审计', description: '检查可疑历史命令', iconFunc: FileText },
-
-      // 网络与时间
-      { id: 'ntp-config', name: '时间同步检查', description: '检查 NTP 时间同步配置', iconFunc: Time },
-      { id: 'dns-config', name: 'DNS 配置检查', description: '检查 DNS 解析配置安全', iconFunc: LinkCloud }
-    ];
-
-    // 性能检测项目 - 使用 IconPark 图标
-    const performanceChecks = [
-      { id: 'cpu-test', name: 'CPU 压力测试', description: '测试 CPU 性能和频率', iconFunc: Cpu },
-      { id: 'memory-test', name: '内存性能测试', description: '测试内存读写速度', iconFunc: Memory },
-      { id: 'disk-test', name: '磁盘 I/O 测试', description: '测试磁盘读写性能', iconFunc: System },
-      { id: 'network-test', name: '网络性能测试', description: '测试带宽和延迟', iconFunc: Speed }
-    ];
-
-    const renderCheckItem = (check: any, category: string) => {
-      // 使用 iconFunc 渲染 SVG 图标
-      const iconSVG = check.iconFunc ? check.iconFunc({ theme: 'filled', size: '20', fill: 'currentColor' }) : '';
-
-      return `
-        <div class="detection-item" data-check-id="${check.id}" data-category="${category}" style="
-          display: flex;
-          align-items: flex-start;
-          gap: 16px;
-          padding: 16px;
-          border: 1px solid var(--border-color);
-          border-radius: var(--border-radius-lg);
-          background: var(--bg-secondary);
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-        " onclick="
-          const checkbox = this.querySelector('input[type=checkbox]');
-          checkbox.checked = !checkbox.checked;
-          this.classList.toggle('selected', checkbox.checked);
-          if(checkbox.checked) {
-            this.style.borderColor = 'var(--primary-color)';
-            this.style.background = 'var(--bg-primary)';
-            this.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.05)';
-          } else {
-            this.style.borderColor = 'var(--border-color)';
-            this.style.background = 'var(--bg-secondary)';
-            this.style.boxShadow = 'none';
-          }
-        " onmouseover="if(!this.classList.contains('selected')) { this.style.background='var(--bg-primary)'; this.style.borderColor='var(--border-hover)'; }"
-           onmouseout="if(!this.classList.contains('selected')) { this.style.background='var(--bg-secondary)'; this.style.borderColor='var(--border-color)'; }">
-          
-          <div style="
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            background: var(--bg-tertiary);
-            color: var(--primary-color);
-            flex-shrink: 0;
-            margin-top: 2px;
-          ">
-            ${iconSVG}
-          </div>
-
-          <div style="flex: 1;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-              <div style="font-weight: 600; color: var(--text-primary); font-size: 14px; margin-bottom: 4px;">${check.name}</div>
-              <input type="checkbox" id="check-${check.id}" checked style="
-                width: 16px;
-                height: 16px;
-                accent-color: var(--primary-color);
-                cursor: pointer;
-                margin-top: 2px;
-              " onclick="event.stopPropagation();">
-            </div>
-            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin-bottom: 8px;">${check.description}</div>
-            
-            <div id="status-${check.id}" class="check-status" style="
-              display: inline-flex;
-              align-items: center;
-              font-size: 11px;
-              color: var(--text-secondary);
-              padding: 2px 8px;
-              border-radius: 4px;
-              background: var(--bg-tertiary);
-            ">
-              <span style="width: 6px; height: 6px; background: var(--text-disabled); border-radius: 50%; margin-right: 6px;"></span>
-              待检测
-            </div>
-          </div>
-      </div>
-      `;
-    };
-
-    return `
-      <div class="quick-detection-page" style="
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: var(--spacing-lg) var(--spacing-md);
-        min-height: 100%;
-      ">
-        <!-- 顶部 Header -->
-        <div style="
-          background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
-          border-radius: var(--border-radius-xl);
-          padding: 32px;
-          margin-bottom: var(--spacing-xl);
-          border: 1px solid var(--border-color);
-          position: relative;
-          overflow: hidden;
-          box-shadow: var(--shadow-sm);
-        ">
-          <div style="position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <h2 style="margin: 0 0 8px 0; font-size: 24px; color: var(--text-primary); font-weight: 700;">快速检测中心</h2>
-              <p style="margin: 0; font-size: 14px; color: var(--text-secondary); max-width: 500px;">
-                全方位服务器安全漏洞扫描与性能体检，护航系统稳定运行
-              </p>
-            </div>
-            
-            <div style="display: flex; gap: 12px;">
-              <button id="quick-scan-all-btn" class="modern-btn primary large" style="
-                padding: 10px 24px;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-              " onclick="window.quickDetection?.startFullScan()">
-                ${Rocket({ theme: 'filled', size: '18', fill: 'currentColor' })}
-                <span style="margin-left: 8px;">一键全面扫描</span>
-              </button>
-              
-              <button id="quick-view-report-btn" class="modern-btn secondary large" style="
-                padding: 10px 24px;
-                font-size: 14px;
-                background: var(--bg-primary);
-              " onclick="window.quickDetection?.viewReport()">
-                ${Analysis({ theme: 'outline', size: '18', fill: 'currentColor' })}
-                <span style="margin-left: 8px;">查看报告</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 装饰背景 -->
-          <div style="
-            position: absolute;
-            right: -10px;
-            top: -30px;
-            opacity: 0.03;
-            transform: rotate(10deg);
-            pointer-events: none;
-            color: var(--text-primary);
-          ">
-            ${Shield({ theme: 'filled', size: '180', fill: 'currentColor' })}
-          </div>
-        </div>
-
-        <!-- 进度面板 -->
-        <div id="detection-progress-panel" style="
-          display: none;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          border-radius: var(--border-radius-lg);
-          padding: 24px;
-          margin-bottom: var(--spacing-xl);
-          box-shadow: var(--shadow-md);
-        ">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px;">
-            <div>
-              <div style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">
-                <span class="pulse-dot" style="display: inline-block; width: 8px; height: 8px; background: var(--primary-color); border-radius: 50%; margin-right: 8px;"></span>
-                正在进行检测...
-              </div>
-              <div id="detection-current-task" style="color: var(--text-secondary); font-size: 13px; margin-left: 16px;">正在初始化检测引擎...</div>
-            </div>
-            <div id="detection-score-display" style="font-size: 32px; font-weight: 700; color: var(--primary-color); font-family: monospace;">--</div>
-          </div>
-          
-          <div style="width: 100%; height: 8px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
-            <div id="detection-progress-bar" style="
-              width: 0%;
-              height: 100%;
-              background: linear-gradient(90deg, var(--primary-color), #8b5cf6);
-              transition: width 0.3s ease;
-              border-radius: 4px;
-            "></div>
-          </div>
-          
-          <div style="display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 12px;">
-            <span id="detection-progress-text">0%</span>
-            <span id="detection-items-count">0/0 项</span>
-          </div>
-        </div>
-
-        <!-- 结果汇总面板 -->
-        <div id="detection-summary-panel" style="
-          display: none;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          border-radius: var(--border-radius-lg);
-          padding: 24px;
-          margin-bottom: var(--spacing-xl);
-          box-shadow: var(--shadow-md);
-        ">
-          <div style="display: flex; gap: 32px; align-items: center;">
-            <div style="text-align: center; padding-right: 32px; border-right: 1px solid var(--border-color);">
-              <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">安全评分</div>
-              <div style="display: flex; align-items: baseline; gap: 4px;">
-                <span id="final-score" style="font-size: 42px; font-weight: 700; color: var(--success-color);">--</span>
-                <span style="font-size: 16px; color: var(--text-secondary);">/100</span>
-              </div>
-            </div>
-            
-            <div style="flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
-              <div style="padding: 16px; background: rgba(239, 68, 68, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(239, 68, 68, 0.1); text-align: center;">
-                <div style="font-size: 24px; font-weight: 700; color: #ef4444;" id="critical-count">0</div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">严重风险</div>
-              </div>
-              <div style="padding: 16px; background: rgba(245, 158, 11, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(245, 158, 11, 0.1); text-align: center;">
-                <div style="font-size: 24px; font-weight: 700; color: #f59e0b;" id="high-count">0</div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">高危风险</div>
-              </div>
-              <div style="padding: 16px; background: rgba(234, 179, 8, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(234, 179, 8, 0.1); text-align: center;">
-                <div style="font-size: 24px; font-weight: 700; color: #eab308;" id="medium-count">0</div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">中危风险</div>
-              </div>
-              <div style="padding: 16px; background: rgba(59, 130, 246, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(59, 130, 246, 0.1); text-align: center;">
-                <div style="font-size: 24px; font-weight: 700; color: #3b82f6;" id="low-count">0</div>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">低危建议</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <!-- 性能检测 -->
-          <div style="margin-bottom: 24px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="padding: 8px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; color: var(--primary-color);">
-                  ${Speed({ theme: 'filled', size: '20', fill: 'currentColor' })}
-                </div>
-                <div>
-                  <h3 style="margin: 0; font-size: 16px; color: var(--text-primary); font-weight: 600;">性能检测</h3>
-                  <div style="font-size: 12px; color: var(--text-secondary);">${performanceChecks.length} 项性能评估</div>
-                </div>
-              </div>
-              <button class="modern-btn text-only" style="font-size: 12px;" onclick="window.quickDetection?.toggleAllChecks('performance')">全选</button>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
-              ${performanceChecks.map(check => renderCheckItem(check, 'performance')).join('')}
-            </div>
-          </div>
-
-          <!-- 安全检测 -->
-          <div>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="padding: 8px; background: rgba(34, 197, 94, 0.1); border-radius: 8px; color: var(--success-color);">
-                  ${Shield({ theme: 'filled', size: '20', fill: 'currentColor' })}
-                </div>
-                <div>
-                  <h3 style="margin: 0; font-size: 16px; color: var(--text-primary); font-weight: 600;">安全检测</h3>
-                  <div style="font-size: 12px; color: var(--text-secondary);">${securityChecks.length} 项安全检查</div>
-                </div>
-              </div>
-              <button class="modern-btn text-only" style="font-size: 12px;" onclick="window.quickDetection?.toggleAllChecks('security')">全选</button>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
-              ${securityChecks.map(check => renderCheckItem(check, 'security')).join('')}
-            </div>
-          </div>
-        </div>
-
-        <!-- 检测历史 -->
-        <div style="margin-top: 48px; border-top: 1px solid var(--border-color); padding-top: 24px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-            <h3 style="margin: 0; font-size: 16px; color: var(--text-primary); font-weight: 600; display: flex; align-items: center;">
-              <span style="margin-right: 8px; display: inline-flex;">
-                ${History({ theme: 'outline', size: '18', fill: 'currentColor' })}
-              </span>
-              检测历史
-            </h3>
-            <button class="modern-btn secondary small" style="font-size: 12px;" onclick="window.quickDetection?.clearHistory()">清空历史</button>
-          </div>
-          <div id="detection-history-list" style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="text-align: center; padding: 32px; color: var(--text-secondary); background: var(--bg-secondary); border-radius: var(--border-radius); border: 1px dashed var(--border-color); font-size: 13px;">
-              暂无历史记录
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
+    return renderQuickDetectionPage();
   }
 
   /**

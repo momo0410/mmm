@@ -2430,6 +2430,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
   (window as any).connectServer = async (serverId: string) => {
     try {
       console.log('🔗 连接服务器:', serverId);
+      const stateManager = app?.getStateManager?.();
 
       // 关闭服务器管理模态框和下拉菜单
       (window as any).hideServerModal();
@@ -2447,6 +2448,10 @@ function setupGlobalModalFunctions(app: SDITApp) {
       if (connectionCard) {
         connectionCard.classList.add('connecting');
       }
+
+      // 进入连接加载态，显示安全连接页面
+      stateManager?.setLoading(true);
+      app?.render();
 
       const sshManager = (window as any).app?.sshManager;
       if (sshManager) {
@@ -2482,6 +2487,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
                 if (connectionCard) {
                   connectionCard.classList.remove('connecting');
                 }
+                stateManager?.setLoading(false);
+                app?.render();
                 // 重置连接标志
                 (window as any).__isConnecting = false;
                 return;
@@ -2523,14 +2530,12 @@ function setupGlobalModalFunctions(app: SDITApp) {
             }
 
             // 连接成功后在后台加载系统摘要信息（轻量版），避免阻塞连接完成。
-            void (async () => {
-              try {
-                const liveStatus = await sshConnectionManager.checkConnectionStatus(false);
-                if (!liveStatus?.connected) {
-                  console.debug('跳过系统摘要初始化：后端连接状态不可用');
-                  return;
-                }
-                console.log('📊 正在后台获取系统摘要信息（轻量版）...');
+            try {
+              const liveStatus = await sshConnectionManager.checkConnectionStatus(false);
+              if (!liveStatus?.connected) {
+                console.debug('跳过系统摘要初始化：后端连接状态不可用');
+              } else {
+                console.log('📊 正在初始化仪表盘摘要信息...');
                 await sshManager.fetchSystemSummary();
 
                 const currentState = app?.getStateManager()?.getState();
@@ -2543,16 +2548,14 @@ function setupGlobalModalFunctions(app: SDITApp) {
                   });
                 }
 
-                const currentPage = app?.getStateManager()?.getState()?.currentPage;
-                if (currentPage === 'dashboard' || currentPage === 'system-info') {
-                  app?.render();
-                }
-
-                console.log('✅ 系统摘要信息获取成功');
-              } catch (error) {
-                console.warn('⚠️ 获取系统摘要信息失败，但SSH连接成功:', error);
+                console.log('✅ 仪表盘摘要信息初始化成功');
               }
-            })();
+            } catch (error) {
+              console.warn('⚠️ 获取系统摘要信息失败，但SSH连接成功:', error);
+            } finally {
+              stateManager?.setLoading(false);
+              app?.render();
+            }
 
             // 注意：不在这里停止动画，让状态监听器来处理
             // 当 isConnected 变为 true 时，状态监听器会重新渲染卡片
@@ -2569,14 +2572,14 @@ function setupGlobalModalFunctions(app: SDITApp) {
             console.log('✅ 服务器连接成功');
             (window as any).showNotification?.(`已成功连接到 ${connection.name}`, 'success');
           } finally {
-            // 注意：不再设置全局loading状态，避免阻塞UI
-            // stateManager?.setLoading(false);
             (window as any).refreshDashboard?.();
           }
         }
       } else {
         console.error('❌ SSH管理器未初始化');
         (window as any).showNotification?.('SSH管理器未初始化', 'error');
+        stateManager?.setLoading(false);
+        app?.render();
       }
     } catch (error) {
       console.error('❌ 连接服务器失败:', error);
@@ -2608,9 +2611,9 @@ function setupGlobalModalFunctions(app: SDITApp) {
         (window as any).showNotification?.(`连接失败：${errorMessage}`, 'error');
       }
 
-      // 注意：不再设置全局loading状态，避免阻塞UI
-      // const stateManager = (window as any).app?.getStateManager?.();
-      // stateManager?.setLoading(false);
+      const stateManager = app?.getStateManager?.();
+      stateManager?.setLoading(false);
+      app?.render();
       (window as any).refreshDashboard?.();
     }
   };
@@ -3319,29 +3322,9 @@ function setupGlobalModalFunctions(app: SDITApp) {
       await (window as any).loadSystemInfoTabLazy(currentTabId, true);
       console.log('✅ 系统信息刷新完成');
 
-      // 显示成功提示
+      // 使用统一通知样式，确保深浅主题一致
       setTimeout(() => {
-        const notification = document.createElement('div');
-        notification.style.cssText = `
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          background: var(--bg-success);
-          color: var(--text-primary);
-          padding: 12px 20px;
-          border-radius: var(--border-radius);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-          z-index: 10000;
-          font-size: 14px;
-        `;
-        notification.textContent = '✅ 系统信息已刷新';
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-          if (notification.parentNode) {
-            document.body.removeChild(notification);
-          }
-        }, 3000);
+        (window as any).showNotification?.('系统信息已刷新', 'success');
       }, 100);
 
     } catch (error) {
