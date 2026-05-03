@@ -57,6 +57,8 @@
 .sftp-actions {
   display: flex;
   gap: var(--spacing-sm);
+  margin-left: auto;
+  align-items: center;
 }
 
 /* Toolbar & Navigation */

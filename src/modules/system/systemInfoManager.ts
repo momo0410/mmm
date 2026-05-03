@@ -271,14 +271,23 @@ export class SystemInfoManager {
       }
     }
 
-    // 2. 请求去重：如果已有正在进行的请求，返回同一个 Promise
-    if (!forceRefresh && this.summaryPendingPromise) {
-      console.log('⏳ summary 请求正在进行中，复用现有请求');
+    // 2. 请求去重：如果已有正在进行的请求，直接复用
+    if (this.summaryPendingPromise) {
+      console.log(forceRefresh
+        ? '⏳ summary 强制刷新请求已在进行中，复用现有请求'
+        : '⏳ summary 请求正在进行中，复用现有请求');
       return this.summaryPendingPromise;
     }
 
-    // 3. 标记为更新中（防止与其他全量请求冲突）
+    // 3. 如果全量更新正在进行，优先复用已有的最新摘要/系统信息，避免自动刷新直接失败
     if (this.isUpdating) {
+      if (this.systemInfo) {
+        console.log('⏳ 系统信息正在更新中，复用当前 systemInfo 作为 summary');
+        return {
+          ...this.systemInfo,
+          lastUpdate: new Date(),
+        };
+      }
       throw new Error('系统信息正在更新中');
     }
 

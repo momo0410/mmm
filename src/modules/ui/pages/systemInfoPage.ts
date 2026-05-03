@@ -2,7 +2,6 @@ import {
   Earth,
   Left,
   List,
-  Refresh,
   Right,
   Rocket,
   Shield,
@@ -87,12 +86,6 @@ export function renderSystemInfoPage(context: SystemInfoPageContext): string {
           </div>
         </div>
 
-        <div class="system-info-actions-bottom">
-          <button class="refresh-btn" onclick="window.refreshAllSystemInfo()" title="刷新所有系统信息">
-            ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
-            <span>刷新数据</span>
-          </button>
-        </div>
       </div>
 
       <div class="header-toggle-btn" onclick="window.toggleSystemInfoHeader()" title="切换菜单">

@@ -32,7 +32,7 @@ export function renderRemoteOperationsPage(context: RemoteOperationsPageContext)
             ${History({ theme: 'outline', size: '16', fill: 'currentColor' })}
             <span>历史</span>
           </button>
-          <button id="sftp-refresh-btn" class="modern-btn secondary" onclick="window.sftpRefresh && window.sftpRefresh()" title="刷新列表">
+          <button id="sftp-refresh-btn" class="page-refresh-btn" onclick="window.sftpRefresh && window.sftpRefresh()" title="刷新列表">
             ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
             <span>刷新</span>
           </button>

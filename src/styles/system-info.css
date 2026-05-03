@@ -73,12 +73,6 @@
   background: rgba(248, 250, 252, 0.9);
 }
 
-[data-theme="light"] .system-info-actions-bottom {
-  background: rgba(255, 255, 255, 0.88);
-  border-color: rgba(148, 163, 184, 0.24);
-  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.08);
-}
-
 [data-theme="dark"] .system-info-header {
   background: rgba(30, 41, 59, 0.88);
   border-color: rgba(148, 163, 184, 0.28);
@@ -87,12 +81,6 @@
 
 [data-theme="dark"] .system-info-actions {
   background: rgba(2, 6, 23, 0.2);
-}
-
-[data-theme="dark"] .system-info-actions-bottom {
-  background: rgba(30, 41, 59, 0.88);
-  border-color: rgba(148, 163, 184, 0.28);
-  box-shadow: 4px 0 24px rgba(2, 6, 23, 0.3);
 }
 
 /* Toggle Button */
@@ -226,60 +214,6 @@
 .count-badge.count-badge-loading {
   min-width: 24px;
   opacity: 0.78;
-}
-
-/* Refresh Button Bottom */
-.system-info-actions-bottom {
-  width: 240px;
-  height: 40px;
-  padding: 6px 12px;
-  background: var(--bg-secondary);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-right: 1px solid var(--border-color);
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.05);
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-.system-info-sidebar-wrapper:has(.system-info-header.collapsed) .system-info-actions-bottom {
-  width: 0;
-  height: 0;
-  padding: 0;
-  border: none;
-  opacity: 0;
-}
-
-.refresh-btn {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.refresh-btn:hover {
-  background: var(--bg-tertiary);
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
-.refresh-btn:active {
-  transform: scale(0.98);
 }
 
 /* Content Area */
@@ -505,6 +439,14 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.system-info-inline-refresh {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+  flex-shrink: 0;
 }
 
 /* Form Elements */

@@ -1220,6 +1220,18 @@ export class ModernUIRenderer {
   /**
    * 渲染进程表格
    */
+  private renderSystemInfoRefreshButton(): string {
+    return `
+      <button class="page-refresh-btn system-info-inline-refresh" onclick="window.refreshAllSystemInfo()" title="刷新当前系统信息">
+        ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
+        <span>刷新数据</span>
+      </button>
+    `;
+  }
+
+  /**
+   * 渲染进程表格
+   */
   private renderProcessesTable(): string {
     return `
       <div class="info-table-container">
@@ -1229,6 +1241,7 @@ export class ModernUIRenderer {
             运行中的进程
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <select
               id="processes-filter"
               class="system-select"
@@ -1302,6 +1315,7 @@ export class ModernUIRenderer {
             网络连接详情
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <select
               id="network-filter"
               class="system-select"
@@ -1371,6 +1385,7 @@ export class ModernUIRenderer {
             系统服务状态
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <select
               id="services-filter"
               class="system-select"
@@ -1434,6 +1449,7 @@ export class ModernUIRenderer {
             系统用户列表
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <select
               id="users-filter"
               class="system-select"
@@ -1499,6 +1515,7 @@ export class ModernUIRenderer {
             自启动服务
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <input
               type="text"
               id="autostart-search"
@@ -1549,6 +1566,7 @@ export class ModernUIRenderer {
             计划任务 (Cron Jobs)
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <input
               type="text"
               id="cron-search"
@@ -1598,6 +1616,7 @@ export class ModernUIRenderer {
             防火墙规则
           </span>
           <div class="search-container">
+            ${this.renderSystemInfoRefreshButton()}
             <select
               id="firewall-type-filter"
               class="system-select"
@@ -1759,8 +1778,9 @@ export class ModernUIRenderer {
                   </div>
 
                   <div class="toolbar-actions">
-                      <button class="icon-btn" onclick="window.refreshServerList()" title="刷新列表">
+                      <button class="page-refresh-btn" onclick="window.refreshServerList()" title="刷新列表">
                         ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
+                        <span>刷新</span>
                       </button>
                       <button class="modern-btn primary compact" onclick="window.showAddServerForm()">
                         ${Plus({ theme: 'outline', size: '14', fill: 'currentColor' })}

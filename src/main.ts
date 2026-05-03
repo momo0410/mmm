@@ -3668,21 +3668,24 @@ function setupGlobalModalFunctions(app: SDITApp) {
         try {
           if (app && app.sshManager) {
             // 1. 获取摘要数据（自动刷新时强制拉取，避免 5 秒轮询被缓存吞掉）
-            await app.sshManager.fetchSystemSummary(true);
-            
-            // 2. 从缓存读取最新数据
-            const summary = app.sshManager.getCachedSummary?.();
-            if (!summary || !summary.systemInfo) {
-              console.warn('⚠️ 摘要数据不可用');
-              return;
-            }
-
-            const systemInfo = summary.systemInfo;
+            const latestSummary = await app.sshManager.fetchSystemSummary(true);
+            const systemInfo = {
+              ...latestSummary,
+              lastUpdate: new Date(),
+            };
             const dashboardRenderer = (window as any).dashboardRendererInstance;
 
-            // 3. 局部更新指标卡片（不重建 DOM）
+            // 2. 局部更新指标卡片（不重建 DOM）
             if (dashboardRenderer) {
               dashboardRenderer.updateMetricCards(systemInfo);
+            }
+
+            // 3. 同步当前缓存，避免后续页面读取到旧时间戳
+            if (app.sshManager?.getCachedSummary) {
+              const cached = app.sshManager.getCachedSummary();
+              if (cached?.systemInfo) {
+                cached.systemInfo.lastUpdate = systemInfo.lastUpdate;
+              }
             }
 
             // 4. 局部更新图表（复用实例）

@@ -46,6 +46,26 @@ export class DatabaseRenderer {
                     display: flex;
                     flex-direction: column;
                 }
+                .database-page-topbar {
+                    display: flex;
+                    justify-content: flex-end;
+                    align-items: center;
+                    gap: var(--spacing-sm);
+                    margin-bottom: var(--spacing-md);
+                }
+                .database-content-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    gap: var(--spacing-md);
+                    margin-bottom: var(--spacing-lg);
+                }
+                .database-content-actions {
+                    display: flex;
+                    gap: var(--spacing-sm);
+                    align-items: center;
+                    flex-shrink: 0;
+                }
                 .db-type-header {
                     padding: var(--spacing-md);
                     font-weight: 600;
@@ -180,9 +200,6 @@ export class DatabaseRenderer {
                 <div class="database-sidebar">
                     <div style="padding: var(--spacing-md); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-weight: 600; font-size: 14px;">数据库管理</span>
-                        <button class="modern-btn icon-only" title="刷新">
-                            ${Refresh({theme: 'outline', size: '16', fill: 'currentColor'})}
-                        </button>
                     </div>
                     
                     <div class="db-type-header">视图</div>
@@ -215,12 +232,18 @@ export class DatabaseRenderer {
                 </div>
                 
                 <div class="database-content">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-lg);">
+                    <div class="database-page-topbar page-top-actions">
+                        <button class="page-refresh-btn" title="刷新">
+                            ${Refresh({theme: 'outline', size: '16', fill: 'currentColor'})}
+                            <span>刷新</span>
+                        </button>
+                    </div>
+                    <div class="database-content-header">
                         <div>
                             <h2 style="font-weight: 600; font-size: 20px; margin-bottom: 4px;">数据库连接</h2>
                             <p style="color: var(--text-secondary); font-size: 13px;">管理和监控您的数据库实例</p>
                         </div>
-                        <div style="display: flex; gap: var(--spacing-sm);">
+                        <div class="database-content-actions">
                             <button class="modern-btn primary" onclick="window.showAddDatabaseModal()">
                                 ${Plus({theme: 'outline', size: '16', fill: 'currentColor'})}
                                 <span>新建连接</span>

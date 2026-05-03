@@ -153,7 +153,7 @@
         </button>
         <button 
           v-if="state.viewMode === 'list'"
-          class="payloader-btn payloader-btn--primary" 
+          class="page-refresh-btn payloader-refresh-btn" 
           @click="refresh" 
           :disabled="isLoading"
           title="刷新"
@@ -163,6 +163,7 @@
             <path d="M1 20v-6h6"></path>
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
           </svg>
+          <span>刷新</span>
         </button>
       </template>
     </PayloaderToolbar>
@@ -3200,6 +3201,11 @@ onMounted(() => {
   background: var(--bg-tertiary);
   border-color: var(--primary-color);
   color: var(--primary-color);
+}
+
+.payloader-refresh-btn {
+  min-height: 44px;
+  white-space: nowrap;
 }
 
 /* Agent 运行中 */

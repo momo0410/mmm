@@ -148,8 +148,9 @@ export class LogAnalysisRenderer {
             ` : ''}
           </div>
 
-          <button class="modern-btn primary icon-only" onclick="window.refreshLogAnalysis()" title="刷新日志">
+          <button class="page-refresh-btn" onclick="window.refreshLogAnalysis()" title="刷新日志">
             ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}
+            <span>刷新</span>
           </button>
         </div>
       </div>

@@ -43,6 +43,10 @@
   gap: 8px;
 }
 
+.toolbar-right {
+  margin-left: auto;
+}
+
 .toolbar-title {
   display: flex;
   align-items: center;
