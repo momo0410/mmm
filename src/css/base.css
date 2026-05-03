@@ -4092,24 +4092,15 @@ body,
   will-change: transform;
 }
 
-#page-dashboard .dashboard-viewport-content.dashboard-viewport-content-v3 {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-
 .dashboard-v3 {
   display: flex;
   flex-direction: column;
-  width: 1540px;
-  height: 860px;
-  max-width: 1540px;
-  max-height: 860px;
-  min-height: 860px;
+  height: 100%;
+  max-height: 100%;
   padding: 10px 8px 14px;
   gap: 10px;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: auto;
   background: #f7f9fc;
   font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }

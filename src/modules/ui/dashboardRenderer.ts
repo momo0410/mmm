@@ -27,8 +27,6 @@ type DashboardLiveSnapshot = {
 
 export class DashboardRenderer {
   private static readonly HISTORY_MAX = 20;
-  private static readonly VIEWPORT_WIDTH = 1540;
-  private static readonly VIEWPORT_HEIGHT = 860;
 
   private cpuHistory: number[] = [];
   private memoryHistory: number[] = [];
@@ -50,9 +48,6 @@ export class DashboardRenderer {
 
   constructor() {
     (window as any).dashboardRendererInstance = this;
-    window.addEventListener('resize', () => {
-      this.fitToViewport();
-    });
   }
 
   /**
@@ -77,14 +72,8 @@ export class DashboardRenderer {
     const loadAvg = systemInfo.loadAverage || ['0', '0', '0'];
     const meta = this.systemMetaCache || { os: '检测中...' };
 
-    setTimeout(() => {
-      this.fitToViewport();
-    }, 0);
-
     return `
-      <div class="dashboard-viewport-fit">
-        <div class="dashboard-viewport-content dashboard-viewport-content-v3">
-          <div class="dashboard-v3">
+      <div class="dashboard-v3">
         <div class="dash-v3-header">
           <div class="dash-v3-header-left">
             <div class="dash-v3-logo">${DashboardIcon({ theme: 'filled', size: '22', fill: 'currentColor' })}</div>
@@ -295,37 +284,8 @@ export class DashboardRenderer {
             </div>
           </div>
         </div>
-          </div>
-        </div>
       </div>
     `;
-  }
-
-  fitToViewport(): void {
-    const page = document.getElementById('page-dashboard');
-    const viewportFit = page?.querySelector<HTMLElement>('.dashboard-viewport-fit');
-    const viewportContent = page?.querySelector<HTMLElement>('.dashboard-viewport-content-v3');
-    if (!viewportFit || !viewportContent) {
-      return;
-    }
-
-    const availableWidth = viewportFit.clientWidth;
-    const availableHeight = viewportFit.clientHeight;
-    if (!availableWidth || !availableHeight) {
-      return;
-    }
-
-    const scale = Math.min(
-      availableWidth / DashboardRenderer.VIEWPORT_WIDTH,
-      availableHeight / DashboardRenderer.VIEWPORT_HEIGHT,
-    );
-
-    const scaledWidth = DashboardRenderer.VIEWPORT_WIDTH * scale;
-    const translateX = Math.max(0, (availableWidth - scaledWidth) / 2);
-
-    viewportContent.style.width = `${DashboardRenderer.VIEWPORT_WIDTH}px`;
-    viewportContent.style.height = `${DashboardRenderer.VIEWPORT_HEIGHT}px`;
-    viewportContent.style.transform = `translate(${translateX}px, 0) scale(${scale})`;
   }
 
   private renderMiniBarChart(points: number[], color: string): string {
