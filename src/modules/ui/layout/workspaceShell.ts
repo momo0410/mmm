@@ -11,7 +11,7 @@ export function renderWorkspaceShell(content: string): string {
 }
 
 export function renderPageContainer(pageId: AppPage, content: string, isVisible: boolean): string {
-  const display = isVisible ? 'block' : 'none';
+  const display = isVisible ? 'flex' : 'none';
   return `
     <div class="page-container" id="page-${pageId}" style="display:${display}">
       ${content}
