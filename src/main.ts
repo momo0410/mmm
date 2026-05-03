@@ -25,11 +25,6 @@ import { aiService } from './modules/ai/aiService';
 import { sftpManager } from './modules/remote/sftpManager';
 import { UploadModal } from './modules/ui/uploadModal';
 import { CreateFolderModal } from './modules/ui/createFolderModal';
-import { showPayloader, hidePayloader } from './modules/payloader/mountPayloader';
-
-// 注册到全局供 modernUIRenderer 页面激活钩子调用
-(window as any).showPayloader = showPayloader;
-(window as any).hidePayloader = hidePayloader;
 
 // 创建设置管理器实例
 const settingsManager = new SettingsManager();

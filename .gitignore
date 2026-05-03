@@ -18,6 +18,7 @@ dist/
 src-python/.benchmarks/
 
 # Runtime artifacts
+data/pentest/
 src-python/pentest_state_*.json
 src-python/report.md
 data/audit_log.db

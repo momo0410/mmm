@@ -11,6 +11,7 @@ import { SettingsManager } from '../settings/settingsManager';
 import { SystemInfoManager } from '../system/systemInfoManager';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { sshTerminalManager } from '../ssh/sshTerminalManager';
+import { mountWorkspaceRoot } from '../ui/workspace/mountWorkspaceRoot';
 // 统一从pageTypes导入所有类型，移除本地重复定义
 // @ts-ignore - 类型被重新导出供其他模块使用
 import type { AppPage, UIMode, AppState, ServerInfo } from '../ui/pageTypes';
@@ -187,10 +188,9 @@ export class SDITApp {
       if (!hideSidebar) {
         setTimeout(() => this.modernUIRenderer.bindMiniSidebarTooltips(), 0);
       }
-      // 初始渲染后激活当前页面，触发数据加载
-      if (!hideSidebar) {
-        setTimeout(() => this.modernUIRenderer.activateCurrentPage(), 0);
-      }
+      setTimeout(() => {
+        mountWorkspaceRoot(this.stateManager, this.modernUIRenderer);
+      }, 0);
       // 加载样式
       this.loadStyles();
     }

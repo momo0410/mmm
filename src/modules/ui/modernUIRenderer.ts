@@ -5,7 +5,6 @@
 
 import type { StateManager } from '../core/stateManager';
 import type { AppState } from '../ui/pageTypes';
-import { ALL_PAGE_IDS } from '../ui/pageTypes';
 import { aiService } from '../ai/aiService';
 import { DashboardRenderer } from './dashboardRenderer';
 import { sftpManager } from '../remote/sftpManager';
@@ -62,7 +61,7 @@ import {
   getNavigationItemsForMode,
   type IconKey
 } from './navigationConfig';
-import { renderWorkspaceShell, renderPageContainer } from './layout/workspaceShell';
+import { renderWorkspaceShell } from './layout/workspaceShell';
 import { renderDashboardPage } from './pages/dashboardPage';
 import { renderEmergencyCommandsPage } from './pages/emergencyCommandsPage';
 import { getPageDefinitionMap, type PageDefinition } from './pages/pageRegistry';
@@ -120,9 +119,7 @@ export class ModernUIRenderer {
   public logAnalysisRenderer: LogAnalysisRenderer;
   public sftpContextMenuRenderer: SftpContextMenuRenderer;
   public databaseRenderer: DatabaseRenderer;
-  private pageContainersRendered: boolean = false;
   private currentVisiblePage: AppPage = 'dashboard';
-  private pageInitialized: Set<string> = new Set();
 
   constructor(stateManager: StateManager) {
     this.stateManager = stateManager;
@@ -435,10 +432,6 @@ export class ModernUIRenderer {
                     <option value="Consolas">Consolas</option>
                     <option value="JetBrains Mono">JetBrains Mono</option>
                 </select>
-            </div>
-            <div class="settings-field" style="display: flex; gap: 8px;">
-                <button type="button" class="modern-btn primary" style="flex: 1; padding: 8px; font-size: 12px; justify-content: center;" onclick="event.stopPropagation(); window.showSkillsModal?.()">skills管理</button>
-                <button type="button" class="modern-btn primary" style="flex: 1; padding: 8px; font-size: 12px; justify-content: center;" onclick="event.stopPropagation(); window.showKnowledgeBaseModal?.()">本地知识库管理</button>
             </div>
         </div>
 
@@ -860,26 +853,8 @@ export class ModernUIRenderer {
    * 渲染主工作区
    */
   renderMainWorkspace(): string {
-    if (this.state.loading) {
-      this.pageContainersRendered = false;
-      this.pageInitialized.clear();
-      return renderWorkspaceShell(this.renderLoadingState());
-    }
-
-    if (!this.state.isConnected) {
-      this.pageContainersRendered = false;
-      this.pageInitialized.clear();
-      return renderWorkspaceShell(this.renderConnectionPrompt());
-    }
-
     this.currentVisiblePage = this.state.currentPage;
-    this.pageContainersRendered = true;
-
-    const containers = ALL_PAGE_IDS.map(pageId =>
-      renderPageContainer(pageId, this.getPageHTML(pageId), pageId === this.state.currentPage)
-    ).join('');
-
-    return renderWorkspaceShell(containers);
+    return renderWorkspaceShell('<div id="workspace-vue-root"></div>');
   }
 
   /**
@@ -887,9 +862,6 @@ export class ModernUIRenderer {
    * 用于初始渲染后激活默认页面
    */
   activateCurrentPage(): void {
-    if (!this.pageContainersRendered) {
-      return;
-    }
     const pageId = this.currentVisiblePage;
     if (pageId) {
       this.onPageActivated(pageId);
@@ -900,42 +872,16 @@ export class ModernUIRenderer {
    * 切换页面（仅切换 display，不重建 DOM）
    */
   switchToPage(pageId: AppPage): void {
-    if (!this.pageContainersRendered) {
-      return;
-    }
-
-    const prevPage = this.currentVisiblePage;
-    if (prevPage === pageId) {
-      return;
-    }
-
-    const prevContainer = document.getElementById(`page-${prevPage}`);
-    const nextContainer = document.getElementById(`page-${pageId}`);
-
-    if (prevContainer) {
-      prevContainer.style.display = 'none';
-      this.onPageDeactivated(prevPage);
-    }
-
-    if (nextContainer) {
-      nextContainer.style.display = 'block';
-      this.currentVisiblePage = pageId;
-      this.onPageActivated(pageId);
-    }
+    this.currentVisiblePage = pageId;
   }
 
   /**
    * 刷新单个页面的容器内容（保留容器外层，只替换内部 HTML）
    */
   refreshPageContainer(pageId: AppPage): void {
-    if (!this.pageContainersRendered) {
-      return;
-    }
-
-    const container = document.getElementById(`page-${pageId}`);
-    if (container) {
-      container.innerHTML = this.getPageHTML(pageId);
-    }
+    window.dispatchEvent(new CustomEvent('workspace-page-refresh', {
+      detail: { pageId }
+    }));
   }
 
   /**
@@ -1000,14 +946,6 @@ export class ModernUIRenderer {
           (window as any).refreshLogAnalysis?.();
         }, 200);
         break;
-      case 'payloader':
-        setTimeout(() => {
-          const show = (window as any).showPayloader;
-          if (typeof show === 'function') {
-            show();
-          }
-        }, 50);
-        break;
       case 'database':
         break;
     }
@@ -1023,15 +961,28 @@ export class ModernUIRenderer {
       case 'dashboard':
         (window as any).stopDashboardAutoRefresh?.();
         break;
-      case 'payloader':
-        setTimeout(() => {
-          const hide = (window as any).hidePayloader;
-          if (typeof hide === 'function') {
-            hide();
-          }
-        }, 0);
-        break;
     }
+  }
+
+  public getPageHTMLForVue(pageId: AppPage): string {
+    return this.getPageHTML(pageId);
+  }
+
+  public activatePageForVue(pageId: AppPage): void {
+    this.currentVisiblePage = pageId;
+    this.onPageActivated(pageId);
+  }
+
+  public deactivatePageForVue(pageId: AppPage): void {
+    this.onPageDeactivated(pageId);
+  }
+
+  public renderLoadingStateForVue(): string {
+    return this.renderLoadingState();
+  }
+
+  public renderConnectionPromptForVue(): string {
+    return this.renderConnectionPrompt();
   }
 
   private savePageUIState(pageId: AppPage): void {

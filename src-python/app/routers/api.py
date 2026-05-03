@@ -1517,9 +1517,12 @@ from uuid import uuid4
 _pentest_tasks: dict[str, dict] = {}
 """所有渗透任务 {task_id: {target, state_file, start_time, task_obj, status}}"""
 
-_PENTEST_STATE_DIR = os.path.dirname(
+_SRC_PYTHON_DIR = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
+_PROJECT_ROOT_DIR = os.path.dirname(_SRC_PYTHON_DIR)
+_PENTEST_STATE_DIR = os.path.join(_PROJECT_ROOT_DIR, "data", "pentest")
+_LEGACY_PENTEST_STATE_DIRS = [_SRC_PYTHON_DIR]
 
 def _state_file(task_id: str) -> str:
     return os.path.join(_PENTEST_STATE_DIR, f"pentest_state_{task_id}.json")
@@ -1533,12 +1536,22 @@ def _extract_task_id_from_state_file(path: str) -> Optional[str]:
     return name[len(prefix):-len(suffix)]
 
 def _list_pentest_state_files() -> list[str]:
-    if not os.path.isdir(_PENTEST_STATE_DIR):
-        return []
-    files = []
-    for name in os.listdir(_PENTEST_STATE_DIR):
-        if name.startswith("pentest_state_") and name.endswith(".json"):
-            files.append(os.path.join(_PENTEST_STATE_DIR, name))
+    files: list[str] = []
+    seen: set[str] = set()
+    search_dirs = [_PENTEST_STATE_DIR, *_LEGACY_PENTEST_STATE_DIRS]
+
+    for directory in search_dirs:
+        if not os.path.isdir(directory):
+            continue
+        for name in os.listdir(directory):
+            if not name.startswith("pentest_state_") or not name.endswith(".json"):
+                continue
+            full_path = os.path.join(directory, name)
+            if full_path in seen:
+                continue
+            seen.add(full_path)
+            files.append(full_path)
+
     return sorted(files, reverse=True)
 
 def _resolve_task_state_path(task_id: str) -> Optional[str]:
@@ -1551,6 +1564,11 @@ def _resolve_task_state_path(task_id: str) -> Optional[str]:
     state_path = _state_file(task_id)
     if os.path.exists(state_path):
         return state_path
+
+    for directory in _LEGACY_PENTEST_STATE_DIRS:
+        legacy_path = os.path.join(directory, f"pentest_state_{task_id}.json")
+        if os.path.exists(legacy_path):
+            return legacy_path
     return None
 
 def _load_task_state(task_id: str) -> Optional[State]:
@@ -1782,17 +1800,33 @@ async def pentest_history():
 @router.delete("/agent/history/{task_id}")
 async def pentest_delete_history(task_id: str):
     tinfo = _pentest_tasks.pop(task_id, None)
-    state_path = _state_file(task_id)
-    deleted = False
+    candidate_paths = [_state_file(task_id)]
 
     if tinfo and tinfo.get("state_file"):
-        state_path = tinfo["state_file"]
+        candidate_paths.insert(0, tinfo["state_file"])
 
-    try:
-        os.remove(state_path)
-        deleted = True
-    except FileNotFoundError:
-        deleted = False
+    for directory in _LEGACY_PENTEST_STATE_DIRS:
+        candidate_paths.append(os.path.join(directory, f"pentest_state_{task_id}.json"))
+
+    deleted = False
+    for state_path in dict.fromkeys(candidate_paths):
+        try:
+            os.remove(state_path)
+            deleted = True
+        except FileNotFoundError:
+            continue
+
+    report_candidates = [
+        os.path.join(_PENTEST_STATE_DIR, f"pentest_report_{task_id}.md"),
+    ]
+    for directory in _LEGACY_PENTEST_STATE_DIRS:
+        report_candidates.append(os.path.join(directory, "report.md"))
+        report_candidates.append(os.path.join(directory, f"pentest_report_{task_id}.md"))
+    for report_path in dict.fromkeys(report_candidates):
+        try:
+            os.remove(report_path)
+        except FileNotFoundError:
+            continue
 
     if deleted or tinfo:
         return {"success": True, "message": "已删除"}

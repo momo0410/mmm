@@ -127,6 +127,30 @@
             运行中
           </span>
         </button>
+        <button
+          v-if="state.viewMode === 'list'"
+          class="payloader-btn payloader-btn--tool"
+          @click="openSkillsManager"
+          title="skills管理"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3l7 4v10l-7 4-7-4V7l7-4z"></path>
+            <path d="M9 12l2 2 4-4"></path>
+          </svg>
+          skills管理
+        </button>
+        <button
+          v-if="state.viewMode === 'list'"
+          class="payloader-btn payloader-btn--tool"
+          @click="openKnowledgeBaseManager"
+          title="本地知识库管理"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 0 4 24V4.5A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+          本地知识库管理
+        </button>
         <button 
           v-if="state.viewMode === 'list'"
           class="payloader-btn payloader-btn--primary" 
@@ -1196,6 +1220,14 @@ function handlePentestEntry() {
   openPentestModal();
 }
 
+function openSkillsManager() {
+  (window as any).showSkillsModal?.();
+}
+
+function openKnowledgeBaseManager() {
+  (window as any).showKnowledgeBaseModal?.();
+}
+
 function closePentestModal() {
   pentestModalError.value = '';
   showPentestModal.value = false;
@@ -1446,19 +1478,187 @@ function summarizeActionPayload(value: unknown, fallback: string, maxLength = 12
   return `${formatted.slice(0, maxLength).trimEnd()}...`;
 }
 
+function escapeReportHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatReportInline(text: string) {
+  return escapeReportHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function summarizeReportValue(value: unknown, fallback: string, maxLength = 120) {
+  const raw = stripAnsiEscapeCodes(formatActionPayload(value, fallback))
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!raw) {
+    return fallback;
+  }
+
+  let summary = raw;
+  const jsonLike = raw.startsWith('[') || raw.startsWith('{');
+  if (jsonLike) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const preview = parsed.slice(0, 3).map((item) => {
+          if (item && typeof item === 'object') {
+            const record = item as Record<string, unknown>;
+            const port = record.port ? `${record.port}` : '';
+            const service = record.service ? `${record.service}` : '';
+            const url = record.url ? `${record.url}` : '';
+            const techs = Array.isArray(record.technologies) ? record.technologies.slice(0, 3).join(', ') : '';
+            const pieces = [port && `端口 ${port}`, service, url, techs].filter(Boolean);
+            return pieces.join(' / ');
+          }
+          return String(item);
+        }).filter(Boolean);
+        summary = preview.join('；');
+        if (parsed.length > preview.length) {
+          summary += ` 等 ${parsed.length} 项`;
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        const entries = Object.entries(parsed as Record<string, unknown>)
+          .slice(0, 4)
+          .map(([key, item]) => `${key}: ${String(item)}`);
+        summary = entries.join('；');
+      }
+    } catch {
+      summary = raw;
+    }
+  }
+
+  summary = summary
+    .replace(/^\s*[-*]\s*/, '')
+    .replace(/\s*[\r\n]+\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  if (summary.length <= maxLength) {
+    return summary;
+  }
+
+  return `${summary.slice(0, maxLength).trimEnd()}...`;
+}
+
+function buildReportListItem(label: string, value: unknown, fallback: string, maxLength = 140) {
+  return `- **${label}**：${summarizeReportValue(value, fallback, maxLength)}`;
+}
+
 function renderReportMarkdown(md: string): string {
   try {
-    return md
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`(.+?)`/g, '<code>$1</code>')
-      .replace(/^---$/gm, '<hr>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/\n/g, '<br>');
+    const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+    const parts: string[] = [];
+    let paragraph: string[] = [];
+    let listItems: string[] = [];
+    let orderedItems: string[] = [];
+    let inCodeBlock = false;
+    let codeLines: string[] = [];
+
+    const flushParagraph = () => {
+      if (paragraph.length === 0) return;
+      parts.push(`<p>${formatReportInline(paragraph.join(' '))}</p>`);
+      paragraph = [];
+    };
+
+    const flushList = () => {
+      if (listItems.length === 0) return;
+      parts.push(`<ul>${listItems.map((item) => `<li>${formatReportInline(item)}</li>`).join('')}</ul>`);
+      listItems = [];
+    };
+
+    const flushOrderedList = () => {
+      if (orderedItems.length === 0) return;
+      parts.push(`<ol>${orderedItems.map((item) => `<li>${formatReportInline(item)}</li>`).join('')}</ol>`);
+      orderedItems = [];
+    };
+
+    const flushCodeBlock = () => {
+      if (!inCodeBlock) return;
+      parts.push(`<pre><code>${escapeReportHtml(codeLines.join('\n'))}</code></pre>`);
+      inCodeBlock = false;
+      codeLines = [];
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        flushParagraph();
+        flushList();
+        flushOrderedList();
+        if (inCodeBlock) {
+          flushCodeBlock();
+        } else {
+          inCodeBlock = true;
+          codeLines = [];
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeLines.push(line);
+        continue;
+      }
+
+      if (!trimmed) {
+        flushParagraph();
+        flushList();
+        flushOrderedList();
+        continue;
+      }
+
+      const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        flushOrderedList();
+        const level = heading[1].length;
+        parts.push(`<h${level}>${formatReportInline(heading[2].trim())}</h${level}>`);
+        continue;
+      }
+
+      if (trimmed === '---') {
+        flushParagraph();
+        flushList();
+        flushOrderedList();
+        parts.push('<hr>');
+        continue;
+      }
+
+      const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+      if (unordered) {
+        flushParagraph();
+        flushOrderedList();
+        listItems.push(unordered[1].trim());
+        continue;
+      }
+
+      const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
+      if (ordered) {
+        flushParagraph();
+        flushList();
+        orderedItems.push(ordered[1].trim());
+        continue;
+      }
+
+      paragraph.push(trimmed);
+    }
+
+    flushParagraph();
+    flushList();
+    flushOrderedList();
+    flushCodeBlock();
+
+    return parts.join('');
   } catch {
-    return md.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    return escapeReportHtml(String(md || '')).replace(/\n/g, '<br>');
   }
 }
 
@@ -1532,39 +1732,57 @@ function buildUserFacingPentestReport(params: {
     return purpose || `${log.tool} ${summarizeActionPayload(log.args, '', 70)}`.trim();
   }).filter(Boolean))).slice(0, 6);
 
-  const successItems = completedLogs.slice(0, 5).map((log) => `- ${log.tool}: ${summarizeActionPayload(log.result || log.full_stdout || log.purpose, '执行完成', 140)}`);
-  const failureItems = failedLogs.slice(0, 5).map((log) => `- ${log.tool}: ${summarizeActionPayload(log.error || log.result || log.full_stdout, '执行失败', 140)}`);
+  const successItems = completedLogs.slice(0, 6).map((log) =>
+    buildReportListItem(log.tool, log.result || log.full_stdout || log.purpose, '执行完成', 150)
+  );
+  const failureItems = failedLogs.slice(0, 6).map((log) =>
+    buildReportListItem(log.tool, log.error || log.result || log.full_stdout, '执行失败', 150)
+  );
   const decisionItems = Array.from(new Set(
     logs
-      .map((log) => summarizeActionPayload(log.llm_decision, '', 220))
+      .map((log) => summarizeReportValue(log.llm_decision, '', 220))
       .filter(Boolean)
-  )).slice(0, 4).map((item) => `- ${item}`);
+  )).slice(0, 4).map((item, index) => `${index + 1}. ${item}`);
   const vulnHints = extractPotentialVulnerabilityHints(params.backendReport || '', params.vulnCount || 0);
   const riskLevel = getPentestRiskLevel(params.vulnCount || 0, failedLogs.length);
+  const target = params.target || normalizedPentestTarget.value || '未知目标';
+  const phaseLabel = getPhaseLabel(params.phase);
+  const workedOnText = workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测';
+  const statusSummary = params.error
+    ? `任务在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
+    : `任务已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核和整理证据。`;
 
   return [
-    '## 总结',
-    params.error
-      ? `任务在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
-      : `任务已在 ${getPhaseLabel(params.phase)} 阶段结束。`,
-    `- 风险等级: ${riskLevel}`,
-    `- 做了什么: ${workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测'}`,
-    `- 成功项: ${completedLogs.length} 项`,
-    `- 失败项: ${failedLogs.length} 项`,
-    `- 发现资产: ${params.findingsCount || 0} 项`,
-    `- 发现漏洞: ${params.vulnCount || 0} 项`,
+    '# 渗透任务总结',
+    statusSummary,
     '',
-    '## 成功项',
+    '## 概览',
+    `- **目标**：${target}`,
+    `- **结束阶段**：${phaseLabel}`,
+    `- **风险等级**：${riskLevel}`,
+    `- **执行动作**：${params.actionsCount || actionableLogs.length || 0} 步`,
+    `- **成功项**：${completedLogs.length} 项`,
+    `- **失败项**：${failedLogs.length} 项`,
+    `- **发现资产**：${params.findingsCount || 0} 项`,
+    `- **发现漏洞**：${params.vulnCount || 0} 项`,
+    '',
+    '## 本次完成',
+    workedOnText,
+    '',
+    '## 关键结果',
     ...(successItems.length > 0 ? successItems : ['- 暂无明确成功结果']),
     '',
-    '## 失败项',
+    '## 失败与阻塞',
     ...(failureItems.length > 0 ? failureItems : ['- 暂无明确失败项']),
     '',
-    '## 可能可利用点',
+    '## 重点风险',
     ...(vulnHints.length > 0 ? vulnHints.map((item) => `- ${item}`) : ['- 暂未发现明确可直接利用的漏洞，建议结合日志继续验证。']),
     '',
     '## AI 决策摘要',
-    ...(decisionItems.length > 0 ? decisionItems : ['- 暂无 AI 决策记录']),
+    ...(decisionItems.length > 0 ? decisionItems : ['1. 暂无 AI 决策记录']),
+    '',
+    '## 说明',
+    '- 页面展示的是面向阅读的总结版，详细参数、原始输出和完整过程请查看右上角“日志”。',
   ].join('\n');
 }
 
@@ -3701,11 +3919,16 @@ onMounted(() => {
   line-height: 1.6;
   color: var(--text-primary);
 }
+.payloader-agent-report-content p { margin: 0 0 10px; }
 .payloader-agent-report-content h1 { font-size: 1.4em; font-weight: 600; margin: 16px 0 8px; color: var(--text-primary); }
 .payloader-agent-report-content h2 { font-size: 1.2em; font-weight: 600; margin: 14px 0 6px; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
 .payloader-agent-report-content h3 { font-size: 1.1em; font-weight: 600; margin: 10px 0 4px; color: var(--text-primary); }
 .payloader-agent-report-content strong { color: var(--text-primary); }
 .payloader-agent-report-content code { background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+.payloader-agent-report-content pre { margin: 10px 0; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
+.payloader-agent-report-content pre code { display: block; padding: 0; background: transparent; border-radius: 0; }
+.payloader-agent-report-content ul,
+.payloader-agent-report-content ol { margin: 8px 0 12px 18px; padding: 0; }
 .payloader-agent-report-content li { margin: 4px 0; padding-left: 4px; }
 .payloader-agent-report-content hr { border: none; border-top: 1px solid var(--border-color); margin: 12px 0; }
 
