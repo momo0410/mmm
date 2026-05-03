@@ -3,7 +3,7 @@ import os
 import shlex
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import asyncssh
 from asyncssh.constants import (
     FILEXFER_TYPE_DIRECTORY,
