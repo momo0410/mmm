@@ -913,9 +913,7 @@ export class ModernUIRenderer {
           if (inst?.initCharts) {
             inst.initCharts(false);
           }
-          if (inst?.fitToViewport) {
-            inst.fitToViewport();
-          }
+          (window as any).adjustDashboardLayout?.();
           this.scheduleLayoutStabilization('dashboard');
           (window as any).startDashboardAutoRefresh?.();
         }, 50);

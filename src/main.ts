@@ -1442,6 +1442,34 @@ function setupGlobalModalFunctions(app: SDITApp) {
     `;
   };
 
+  (window as any).adjustDashboardLayout = () => {
+    const page = document.getElementById('page-dashboard') as HTMLElement | null;
+    const root = page?.querySelector('.dashboard-page-root') as HTMLElement | null;
+    const dashboard = root?.querySelector('.dashboard-v3') as HTMLElement | null;
+    const bottomDock = document.querySelector('.modern-sidebar.mini-sidebar') as HTMLElement | null;
+
+    if (!page || !root || !dashboard || page.offsetParent === null) {
+      return;
+    }
+
+    const pageRect = page.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const bottomBoundary = bottomDock && bottomDock.offsetParent !== null
+      ? bottomDock.getBoundingClientRect().top
+      : pageRect.bottom;
+    const availableHeight = Math.floor(bottomBoundary - rootRect.top);
+
+    if (availableHeight <= 0) {
+      return;
+    }
+
+    root.style.height = `${availableHeight}px`;
+    root.style.maxHeight = `${availableHeight}px`;
+    dashboard.style.minHeight = `${availableHeight}px`;
+    dashboard.style.height = 'auto';
+    dashboard.style.maxHeight = 'none';
+  };
+
   (window as any).adjustSystemInfoTableLayout = () => {
     const page = document.getElementById('page-system-info') as HTMLElement | null;
     const content = document.getElementById('system-info-content') as HTMLElement | null;
@@ -1481,6 +1509,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
   };
 
   window.addEventListener('resize', () => {
+    requestAnimationFrame(() => (window as any).adjustDashboardLayout?.());
     requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   });
 
@@ -3754,6 +3783,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
             if (dashboardRenderer) {
               dashboardRenderer.initCharts(false);  // false = 不强制重建
             }
+
+            requestAnimationFrame(() => (window as any).adjustDashboardLayout?.());
 
             // 5. 局部更新 Top Processes（带缓存）
             if ((window as any).updateDashboardTopProcesses) {

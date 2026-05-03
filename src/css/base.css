@@ -4130,16 +4130,17 @@ body,
 
 .dashboard-v3 {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1.08fr) minmax(0, 0.92fr);
+  grid-template-rows: auto auto auto auto;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 100%;
   width: 100%;
-  height: 100%;
-  max-height: 100%;
-  padding: 10px 8px 14px;
+  height: auto;
+  max-height: none;
+  padding: 10px 8px 0;
   gap: 10px;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: #f7f9fc;
   font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -4317,33 +4318,37 @@ body,
 .dash-v3-row {
   display: grid;
   gap: 14px;
-  min-height: 0;
+  min-height: min-content;
   align-items: stretch;
   align-self: stretch;
 }
 
 .dash-v3-row-charts {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  min-height: 0;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  min-height: min-content;
 }
 
 .dash-v3-row-lines {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-height: 0;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  min-height: min-content;
 }
 
 /* 卡片 */
 .dash-v3-card {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: auto;
   background: #ffffff;
   border-radius: 10px;
   border: 1px solid #dbe7fb;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   overflow: hidden;
   min-width: 0;
-  min-height: 0;
+  min-height: 220px;
+}
+
+.dash-v3-row-charts .dash-v3-card {
+  min-height: 280px;
 }
 
 .dash-v3-card-wide {
@@ -4379,7 +4384,7 @@ body,
 
 .dash-v3-card-body {
   flex: 1;
-  min-height: 0;
+  min-height: 120px;
   padding: 0 12px 8px;
   display: flex;
   flex-direction: column;
@@ -4393,7 +4398,7 @@ body,
 
 .dash-v3-chart-body {
   padding: 4px 12px 6px;
-  min-height: 0;
+  min-height: 180px;
   overflow: hidden;
 }
 
@@ -4894,8 +4899,43 @@ body,
   .dash-v3-row-charts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .dash-v3-row-lines {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .dash-v3-row-charts .dash-v3-card {
     min-width: 240px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .dashboard-v3 {
+    padding: 8px 8px 0;
+    gap: 8px;
+  }
+  .dash-v3-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .dash-v3-header-right {
+    margin-left: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  .dash-v3-refresh-stack {
+    align-items: flex-start;
+  }
+  .dash-v3-info-bar {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .dash-v3-info-col {
+    padding: 0;
+  }
+  .dash-v3-info-col:not(:last-child) {
+    border-right: none;
+    border-bottom: 1px solid #e3eaf6;
+    padding-bottom: 8px;
   }
 }
 
@@ -4909,6 +4949,61 @@ body,
   }
   .dash-v3-info-bar {
     gap: 8px 16px;
+  }
+  .dash-v3-row-charts .dash-v3-card {
+    min-height: 320px;
+  }
+  .dash-v3-card-wide {
+    min-height: 260px;
+  }
+  .dash-v3-ring {
+    width: 110px;
+    height: 110px;
+  }
+  .dash-v3-ring::after {
+    inset: 12px;
+  }
+  .dash-v3-ring-value {
+    font-size: 22px;
+  }
+  .dash-v3-card-header {
+    padding: 10px 12px 6px;
+  }
+  .dash-v3-card-body {
+    padding: 0 10px 10px;
+  }
+  .dash-v3-card-footer {
+    padding: 6px 12px 12px;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+  .dash-v3-net-stats {
+    flex-direction: column;
+  }
+  .dash-v3-net-charts {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .dash-v3-header-left {
+    gap: 10px;
+  }
+  .dash-v3-title {
+    font-size: 16px;
+  }
+  .dash-v3-subtitle,
+  .dash-v3-auto-refresh,
+  .dash-v3-info-label,
+  .dash-v3-info-value {
+    font-size: 12px;
+  }
+  .dash-v3-system-status {
+    width: 100%;
+  }
+  .dash-v3-refresh-btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 
