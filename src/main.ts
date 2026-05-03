@@ -1442,6 +1442,48 @@ function setupGlobalModalFunctions(app: SDITApp) {
     `;
   };
 
+  (window as any).adjustSystemInfoTableLayout = () => {
+    const page = document.getElementById('page-system-info') as HTMLElement | null;
+    const content = document.getElementById('system-info-content') as HTMLElement | null;
+    const tableContainer = content?.querySelector('.info-table-container') as HTMLElement | null;
+    const tableContent = tableContainer?.querySelector('.table-content') as HTMLElement | null;
+    const header = tableContainer?.querySelector('.table-header-toolbar') as HTMLElement | null;
+    const pagination = tableContainer?.querySelector('.table-pagination-container') as HTMLElement | null;
+    const bottomDock = document.querySelector('.modern-sidebar.mini-sidebar') as HTMLElement | null;
+
+    if (!page || !content || !tableContainer || !tableContent || page.offsetParent === null) {
+      return;
+    }
+
+    const pageRect = page.getBoundingClientRect();
+    const tableRect = tableContainer.getBoundingClientRect();
+    const contentStyles = window.getComputedStyle(content);
+    const paddingBottom = Number.parseFloat(contentStyles.paddingBottom || '0') || 0;
+    const bottomBoundary = bottomDock && bottomDock.offsetParent !== null
+      ? bottomDock.getBoundingClientRect().top
+      : pageRect.bottom;
+    const availableHeight = Math.floor(bottomBoundary - tableRect.top - paddingBottom - 2);
+
+    if (availableHeight <= 0) {
+      return;
+    }
+
+    const headerHeight = header?.offsetHeight ?? 0;
+    const paginationHeight = pagination?.offsetHeight ?? 0;
+    const tableBodyHeight = Math.max(availableHeight - headerHeight - paginationHeight, 180);
+
+    tableContainer.style.height = `${availableHeight}px`;
+    tableContainer.style.maxHeight = `${availableHeight}px`;
+    tableContent.style.height = `${tableBodyHeight}px`;
+    tableContent.style.maxHeight = `${tableBodyHeight}px`;
+    tableContent.style.overflowY = 'auto';
+    tableContent.style.overflowX = 'auto';
+  };
+
+  window.addEventListener('resize', () => {
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
+  });
+
   // 切换分页
   (window as any).changeSystemInfoPage = (tabId: string, delta: number) => {
     const pagination = (window as any).systemInfoPagination[tabId];
@@ -1454,6 +1496,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (detailedInfo) {
       (window as any).loadSystemInfoTabData(tabId, detailedInfo);
     }
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 显示服务器模态框
@@ -3096,6 +3139,7 @@ function setupGlobalModalFunctions(app: SDITApp) {
 
     // 按 tab 懒加载数据：有缓存直接渲染，无缓存才请求
     (window as any).loadSystemInfoTabLazy(tabId);
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 按 tab 懒加载：只获取当前 tab 所需的 detail 数据
@@ -3258,6 +3302,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
         (window as any).updateFirewallTable(detailedInfo.firewallRules || []);
         break;
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 刷新所有系统信息（改为只刷新当前 tab）
@@ -3312,6 +3358,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
       if (content && app.modernUIRenderer) {
         content.innerHTML = app.modernUIRenderer.renderSystemInfoTab(currentTabId);
       }
+
+      requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
 
       // 只请求当前 tab 的数据
       await (window as any).loadSystemInfoTabLazy(currentTabId, true);
@@ -3395,6 +3443,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('processes', paginated.total);
     }
 
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
+
   };
 
   // 更新网络表格
@@ -3434,6 +3484,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('network', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 更新系统服务表格
@@ -3485,6 +3537,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('services', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 更新用户表格
@@ -3533,6 +3587,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('users', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 更新自启动表格
@@ -3574,6 +3630,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('autostart', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 更新计划任务表格
@@ -3610,6 +3668,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('cron', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 更新防火墙表格
@@ -3649,6 +3709,8 @@ function setupGlobalModalFunctions(app: SDITApp) {
     if (paginationContainer) {
       paginationContainer.innerHTML = (window as any).renderPaginationControls('firewall', paginated.total);
     }
+
+    requestAnimationFrame(() => (window as any).adjustSystemInfoTableLayout?.());
   };
 
   // 仪表盘自动刷新相关函数

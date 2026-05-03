@@ -9,6 +9,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+DEFAULT_WORDLIST = "/usr/share/wordlists/rockyou.txt"
+
 
 HASH_PATTERNS = {
     "MD5": (r"^[a-f0-9]{32}$", 0),
@@ -54,8 +56,7 @@ def run_hashcat(hash_file, mode, attack="dictionary", wordlist=None, rules=None,
     """Execute hashcat with specified attack mode."""
     cmd = ["hashcat", "-m", str(mode), "--quiet", "--potfile-disable", "-o", "/tmp/hashcat_out.txt"]
     if attack == "dictionary":
-        if not wordlist:
-            return {"error": "wordlist required for dictionary attack"}
+        wordlist = wordlist or DEFAULT_WORDLIST
         cmd += ["-a", "0", hash_file, wordlist]
         if rules:
             cmd += ["-r", rules]

@@ -29,6 +29,8 @@ from collections import Counter
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+DEFAULT_WORDLIST = "/usr/share/wordlists/rockyou.txt"
+
 HASH_PATTERNS = {
     r"^[a-f0-9]{32}$": [("MD5", 0), ("NTLM", 1000)],
     r"^[a-f0-9]{40}$": [("SHA-1", 100)],
@@ -74,7 +76,7 @@ def generate_hashcat_command(
     hash_file: str,
     mode: int,
     attack: str = "dictionary",
-    wordlist: str = "rockyou.txt",
+    wordlist: str = DEFAULT_WORDLIST,
     rules: Optional[str] = None,
     mask: Optional[str] = None,
     output_file: Optional[str] = None,
@@ -232,7 +234,7 @@ def main():
     gen.add_argument("--hash-file", required=True, help="Hash file path")
     gen.add_argument("--mode", type=int, required=True, help="Hashcat hash mode")
     gen.add_argument("--attack", choices=["dictionary", "bruteforce", "hybrid_wm", "hybrid_mw"], default="dictionary")
-    gen.add_argument("--wordlist", default="rockyou.txt")
+    gen.add_argument("--wordlist", default=DEFAULT_WORDLIST)
     gen.add_argument("--rules", help="Rules file")
     gen.add_argument("--mask", help="Mask pattern")
 

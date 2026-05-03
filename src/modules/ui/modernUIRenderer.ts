@@ -888,6 +888,8 @@ export class ModernUIRenderer {
    * 页面激活钩子
    */
   private onPageActivated(pageId: AppPage): void {
+    this.applyPageScrollMode(pageId, true);
+
     switch (pageId) {
       case 'dashboard':
         setTimeout(() => {
@@ -914,6 +916,7 @@ export class ModernUIRenderer {
           if (inst?.fitToViewport) {
             inst.fitToViewport();
           }
+          this.scheduleLayoutStabilization('dashboard');
           (window as any).startDashboardAutoRefresh?.();
         }, 50);
         break;
@@ -923,6 +926,7 @@ export class ModernUIRenderer {
           if (cache) {
             cache.isLoading = false;
           }
+          this.scheduleLayoutStabilization('system-info');
           (window as any).loadSystemDetailedInfo?.(false);
         }, 50);
         break;
@@ -956,6 +960,7 @@ export class ModernUIRenderer {
    */
   private onPageDeactivated(pageId: AppPage): void {
     this.savePageUIState(pageId);
+    this.applyPageScrollMode(pageId, false);
 
     switch (pageId) {
       case 'dashboard':
@@ -979,6 +984,53 @@ export class ModernUIRenderer {
 
   public renderLoadingStateForVue(): string {
     return this.renderLoadingState();
+  }
+
+  private scheduleLayoutStabilization(pageId: AppPage): void {
+    const run = () => {
+      if (this.currentVisiblePage !== pageId) return;
+
+      const pageEl = document.getElementById(`page-${pageId}`) as HTMLElement | null;
+      if (!pageEl || pageEl.offsetParent === null) return;
+
+      // Force a reflow before resize so percentage/flex heights settle on first paint.
+      void pageEl.offsetHeight;
+
+      try {
+        window.dispatchEvent(new Event('resize'));
+      } catch {
+        // ignore
+      }
+    };
+
+    const raf = window.requestAnimationFrame || ((cb: FrameRequestCallback) => window.setTimeout(cb, 16));
+
+    raf(() => {
+      run();
+      raf(() => run());
+    });
+
+    window.setTimeout(run, 80);
+    window.setTimeout(run, 180);
+  }
+
+  private applyPageScrollMode(pageId: AppPage, active: boolean): void {
+    const workspaceContent = document.getElementById('workspace-content') as HTMLElement | null;
+    const pageEl = document.getElementById(`page-${pageId}`) as HTMLElement | null;
+
+    if (pageId === 'system-info') {
+      if (workspaceContent) {
+        workspaceContent.style.overflowY = active ? 'hidden' : '';
+      }
+      if (pageEl) {
+        pageEl.style.overflowY = active ? 'hidden' : '';
+      }
+      return;
+    }
+
+    if (active && workspaceContent && !workspaceContent.style.overflowY) {
+      workspaceContent.style.overflowY = '';
+    }
   }
 
   public renderConnectionPromptForVue(): string {
