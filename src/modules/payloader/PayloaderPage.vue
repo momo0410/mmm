@@ -612,10 +612,34 @@
           <div class="payloader-modal-body payloader-modal-body--scroll payloader-log-body">
             <div v-if="logLoading && logData.length === 0" class="payloader-log-empty">正在加载日志...</div>
             <div v-else-if="logError" class="payloader-log-empty payloader-log-empty--error">{{ logError }}</div>
-            <div v-else-if="logData.length === 0" class="payloader-log-empty">
+            <template v-else>
+              <section v-if="logReport" class="payloader-log-report-section">
+                <div class="payloader-log-report-header">
+                  <div>
+                    <div class="payloader-log-report-eyebrow">执行报告</div>
+                    <h4>本次任务总结</h4>
+                  </div>
+                  <button
+                    v-if="logData.length > 0"
+                    class="payloader-log-jump-btn"
+                    type="button"
+                    @click="scrollLogDetailsIntoView"
+                  >
+                    查看日志详情
+                  </button>
+                </div>
+                <div class="payloader-agent-report-content" v-html="renderReportMarkdown(logReport)"></div>
+              </section>
+              <div v-if="logData.length === 0" class="payloader-log-empty">
               {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
-            </div>
-            <div v-for="(round, roundIdx) in logRounds" :key="round.key" class="payloader-log-round-group">
+              </div>
+            </template>
+            <div
+              v-for="(round, roundIdx) in logRounds"
+              :key="round.key"
+              ref="logDetailRefs"
+              class="payloader-log-round-group"
+            >
               <div class="payloader-log-round-header">
                 <span class="payloader-log-round">Round {{ round.round ?? roundIdx + 1 }}</span>
                 <span class="payloader-log-round-count">{{ round.actions.length }} 个任务</span>
@@ -2106,6 +2130,8 @@ const logLoading = ref(false);
 const logError = ref('');
 const logPhase = ref<string>('init');
 const currentLogTaskId = ref('');
+const logReport = ref('');
+const logDetailRefs = ref<HTMLElement[]>([]);
 
 let logTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -2203,9 +2229,11 @@ async function openLogModal(taskId?: string) {
   const tid = taskId || currentTaskId.value;
   showLogModal.value = true;
   logError.value = '';
+  logDetailRefs.value = [];
 
   if (!tid) {
     logData.value = [];
+    logReport.value = '';
     logPhase.value = 'init';
     logError.value = '当前任务尚未生成日志，请稍后再试。';
     return;
@@ -2213,6 +2241,7 @@ async function openLogModal(taskId?: string) {
 
   if (currentLogTaskId.value !== tid) {
     logData.value = [];
+    logReport.value = '';
   }
   currentLogTaskId.value = tid;
   await loadLogs(tid);
@@ -2234,9 +2263,16 @@ async function loadLogs(taskId?: string, silent = false) {
   logError.value = '';
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
-    const res = await pythonApi.pentestLogs(tid);
-    logPhase.value = res.phase || 'init';
-    logData.value = (res.actions || []).map(normalizeLogEntry);
+    const [logRes, reportRes] = await Promise.all([
+      pythonApi.pentestLogs(tid),
+      pythonApi.pentestGetReport(tid).catch(() => null),
+    ]);
+    logPhase.value = logRes.phase || reportRes?.phase || 'init';
+    logData.value = (logRes.actions || []).map(normalizeLogEntry);
+    const fallbackReport = tid === currentTaskId.value
+      ? String(agentResult.value?.final?.report || '').trim()
+      : '';
+    logReport.value = String(reportRes?.report || fallbackReport).trim();
   } catch (err: any) {
     console.error('加载日志失败:', err);
     logError.value = err?.message || '加载日志失败';
@@ -2244,6 +2280,14 @@ async function loadLogs(taskId?: string, silent = false) {
     logLoading.value = false;
     syncLogPolling();
   }
+}
+
+function scrollLogDetailsIntoView() {
+  const firstDetail = logDetailRefs.value[0];
+  if (!firstDetail) {
+    return;
+  }
+  firstDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ==================== 历史记录 ====================
@@ -4811,6 +4855,56 @@ onMounted(() => {
   overflow-y: auto;
   background: var(--bg-tertiary);
   padding: 16px;
+}
+
+.payloader-log-report-section {
+  margin-bottom: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  padding: 16px 18px;
+}
+
+.payloader-log-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.payloader-log-report-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.payloader-log-report-header h4 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.payloader-log-jump-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.payloader-log-jump-btn:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 .payloader-log-empty {
