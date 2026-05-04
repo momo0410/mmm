@@ -621,7 +621,7 @@
                   </div>
                   <button
                     v-if="logData.length > 0"
-                    class="payloader-log-jump-btn"
+                    class="payloader-btn payloader-btn--secondary payloader-btn--sm"
                     type="button"
                     @click="scrollLogDetailsIntoView"
                   >
@@ -4889,23 +4889,6 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-.payloader-log-jump-btn {
-  flex-shrink: 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-
-.payloader-log-jump-btn:hover {
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.3);
-}
 
 .payloader-log-empty {
   text-align: center;
