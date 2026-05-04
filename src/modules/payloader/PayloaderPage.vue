@@ -896,7 +896,7 @@
                   </div>
                   <div v-if="idx < selectedPayload.execution.length - 1" class="payloader-chain-connector">
                     <div class="payloader-chain-arrow"></div>
-                    <span class="payloader-chain-connector-label">→</span>
+                    <div class="payloader-chain-arrowhead"></div>
                   </div>
                 </div>
               </div>
@@ -2849,21 +2849,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 4px 0;
+  padding: 8px 0 10px;
+  min-height: 42px;
 }
 
 .payloader-chain-arrow {
   width: 2px;
-  height: 20px;
+  height: 24px;
   background: linear-gradient(180deg, var(--primary-color), var(--accent-color, #a855f7));
+  border-radius: 999px;
 }
 
-.payloader-chain-connector-label {
-  font-size: 16px;
-  color: var(--primary-color);
-  font-weight: 700;
-  transform: rotate(90deg);
-  line-height: 1;
+.payloader-chain-arrowhead {
+  width: 10px;
+  height: 10px;
+  margin-top: -1px;
+  border-right: 2px solid var(--accent-color, #a855f7);
+  border-bottom: 2px solid var(--accent-color, #a855f7);
+  transform: rotate(45deg);
 }
 
 /* 分析卡片样式 */
