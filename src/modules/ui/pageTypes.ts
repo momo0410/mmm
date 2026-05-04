@@ -31,26 +31,26 @@ export const DEFAULT_UI_MODE: UIMode = 'classic';
 export const PAGE_TITLES: Record<AppPage, string> = {
   'dashboard': '仪表板',
   'ai-command-center': 'AI指挥台',
-  'system-info': '系统信息',
+  'system-info': '资源监控',
   'ssh-terminal': 'SSH终端',
-  'remote-operations': 'SFTP文件',
-  'emergency-commands': '命令执行',
+  'remote-operations': '文件分析',
+  'emergency-commands': '应急响应',
   'log-analysis': '日志审计',
-  'quick-detection': '快速检测',
+  'quick-detection': '安全评估',
   'database': '数据库',
-  'payloader': '技能知识库'
+  'payloader': '渗透测试'
 };
 export const PAGE_DESCRIPTIONS: Record<AppPage, string> = {
   'dashboard': '查看服务器实时状态概览',
   'ai-command-center': '统一管理 AI 对话、检索与自动化能力',
-  'system-info': '查看详细系统配置信息',
+  'system-info': '查看主机资源状态与运行概览',
   'ssh-terminal': '远程SSH终端',
-  'remote-operations': '远程文件管理与传输',
-  'emergency-commands': '批量执行应急响应命令',
+  'remote-operations': '远程文件查看、传输与分析',
+  'emergency-commands': '批量执行响应命令与处置操作',
   'log-analysis': '系统日志分析与溯源',
   'quick-detection': '一键安全检测与风险评估',
   'database': '数据库管理',
-  'payloader': '安全测试Payload生成'
+  'payloader': '渗透测试知识与Payload工具'
 };
 
 export const ALL_PAGE_IDS: AppPage[] = [

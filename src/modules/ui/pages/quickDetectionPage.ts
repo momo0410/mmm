@@ -151,7 +151,7 @@ export function renderQuickDetectionPage(): string {
       ">
         <div style="position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h2 style="margin: 0 0 8px 0; font-size: 24px; color: var(--text-primary); font-weight: 700;">快速检测中心</h2>
+            <h2 style="margin: 0 0 8px 0; font-size: 24px; color: var(--text-primary); font-weight: 700;">安全评估中心</h2>
             <p style="margin: 0; font-size: 14px; color: var(--text-secondary); max-width: 500px;">
               全方位服务器安全漏洞扫描与性能体检，护航系统稳定运行
             </p>

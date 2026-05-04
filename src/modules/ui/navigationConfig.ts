@@ -57,28 +57,28 @@ const ALL_NAV_ITEMS: NavigationItem[] = [
   },
   {
     id: 'system-info',
-    title: '系统信息',
-    description: '查看详细系统配置信息',
+    title: '资源监控',
+    description: '查看主机资源状态与运行概览',
     iconKey: 'ApplicationMenu',
     visibleInModes: ['classic']
   },
   {
     id: 'remote-operations',
-    title: 'SFTP文件',
-    description: '远程文件管理与传输',
+    title: '文件分析',
+    description: '远程文件查看、传输与分析',
     iconKey: 'FolderOpen',
     visibleInModes: ['classic']
   },
   {
     id: 'emergency-commands',
-    title: '命令执行',
-    description: '批量执行应急响应命令',
+    title: '应急响应',
+    description: '批量执行响应命令与处置操作',
     iconKey: 'Code',
     visibleInModes: ['classic']
   },
   {
     id: 'quick-detection',
-    title: '快速检测',
+    title: '安全评估',
     description: '一键安全检测与风险评估',
     iconKey: 'Rocket',
     visibleInModes: ['classic']
@@ -92,8 +92,8 @@ const ALL_NAV_ITEMS: NavigationItem[] = [
   },
   {
     id: 'payloader',
-    title: '技能知识库',
-    description: '安全测试Payload生成',
+    title: '渗透测试',
+    description: '渗透测试知识与Payload工具',
     iconKey: 'Code',
     visibleInModes: ['classic']
   },
