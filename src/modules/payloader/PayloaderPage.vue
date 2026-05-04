@@ -621,7 +621,7 @@
                   </div>
                   <button
                     v-if="logData.length > 0"
-                    class="payloader-btn payloader-btn--secondary payloader-btn--sm"
+                    class="payloader-modal-header-btn payloader-log-report-action"
                     type="button"
                     @click="scrollLogDetailsIntoView"
                   >
@@ -4887,6 +4887,10 @@ onMounted(() => {
   font-size: 18px;
   line-height: 1.3;
   color: var(--text-primary);
+}
+
+.payloader-log-report-action {
+  align-self: center;
 }
 
 
