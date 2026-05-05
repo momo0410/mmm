@@ -4091,6 +4091,7 @@ async function loadLogFileList() {
  */
 (window as any).refreshLogAnalysis = async function () {
   console.log('🔄 刷新日志审计');
+  cancelActiveLogAIAnalysis();
   
   // 尝试加载文件列表（异步执行，不阻塞UI）
   loadLogFileList();
@@ -4235,6 +4236,56 @@ function renderLogEntries(entries: any[]): string {
   `;
 }
 
+function getLogAIRequestState() {
+  const win = window as any;
+  if (!win.logAIRequestState) {
+    win.logAIRequestState = {
+      requestId: 0,
+      controller: null as AbortController | null,
+    };
+  }
+  return win.logAIRequestState as {
+    requestId: number;
+    controller: AbortController | null;
+  };
+}
+
+function cancelActiveLogAIAnalysis() {
+  const requestState = getLogAIRequestState();
+  if (requestState.controller) {
+    requestState.controller.abort();
+    requestState.controller = null;
+  }
+}
+
+function beginLogAIAnalysisRequest() {
+  const requestState = getLogAIRequestState();
+  cancelActiveLogAIAnalysis();
+  const controller = new AbortController();
+  const requestId = requestState.requestId + 1;
+  requestState.requestId = requestId;
+  requestState.controller = controller;
+  return { requestId, controller };
+}
+
+function isCurrentLogAIRequest(requestId: number) {
+  return getLogAIRequestState().requestId === requestId;
+}
+
+function finishLogAIAnalysisRequest(requestId: number) {
+  const requestState = getLogAIRequestState();
+  if (requestState.requestId === requestId) {
+    requestState.controller = null;
+  }
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 /**
  * 切换 AI 分析面板显示
  */
@@ -4285,6 +4336,8 @@ function renderLogEntries(entries: any[]): string {
   content.style.display = 'block';
   content.textContent = 'AI 正在分析日志，请稍候...';
 
+  const { requestId, controller } = beginLogAIAnalysisRequest();
+
   if (btn) {
     btn.disabled = true;
     btn.textContent = '分析中...';
@@ -4300,6 +4353,7 @@ function renderLogEntries(entries: any[]): string {
       logText,
       source,
       (chunk) => {
+        if (!isCurrentLogAIRequest(requestId)) return;
         if (!finalText) {
           content.textContent = '';
         }
@@ -4307,16 +4361,23 @@ function renderLogEntries(entries: any[]): string {
         content.textContent = finalText;
       },
       (completedText) => {
+        if (!isCurrentLogAIRequest(requestId)) return;
         finalText = completedText;
-      }
+      },
+      controller.signal
     );
 
+    if (!isCurrentLogAIRequest(requestId)) return;
     content.textContent = finalText || '分析完成，但未返回内容。';
   } catch (error: any) {
+    if (isAbortLikeError(error) || !isCurrentLogAIRequest(requestId)) {
+      return;
+    }
     const msg = error?.message || String(error);
     content.textContent = `AI 分析失败: ${msg}`;
   } finally {
-    if (btn) {
+    finishLogAIAnalysisRequest(requestId);
+    if (btn && isCurrentLogAIRequest(requestId)) {
       btn.disabled = false;
       btn.textContent = 'AI分析';
     }
@@ -4671,6 +4732,8 @@ function getLogMultiSelectState() {
   content.style.display = 'block';
   content.textContent = `AI 正在分析选中的 ${lines.length} 条日志，请稍候...`;
 
+  const { requestId, controller } = beginLogAIAnalysisRequest();
+
   if (analyzeBtn) {
     analyzeBtn.disabled = true;
     analyzeBtn.textContent = '分析中...';
@@ -4686,6 +4749,7 @@ function getLogMultiSelectState() {
       logText,
       source,
       (chunk) => {
+        if (!isCurrentLogAIRequest(requestId)) return;
         if (!finalText) {
           content.textContent = '';
         }
@@ -4693,16 +4757,23 @@ function getLogMultiSelectState() {
         content.textContent = finalText;
       },
       (completedText) => {
+        if (!isCurrentLogAIRequest(requestId)) return;
         finalText = completedText;
-      }
+      },
+      controller.signal
     );
 
+    if (!isCurrentLogAIRequest(requestId)) return;
     content.textContent = finalText || '分析完成，但未返回内容。';
   } catch (error: any) {
+    if (isAbortLikeError(error) || !isCurrentLogAIRequest(requestId)) {
+      return;
+    }
     const msg = error?.message || String(error);
     content.textContent = `AI 分析失败: ${msg}`;
   } finally {
-    if (analyzeBtn) {
+    finishLogAIAnalysisRequest(requestId);
+    if (analyzeBtn && isCurrentLogAIRequest(requestId)) {
       analyzeBtn.disabled = false;
       analyzeBtn.textContent = 'AI分析';
     }

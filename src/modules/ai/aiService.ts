@@ -279,13 +279,15 @@ export class AIService {
     severity: string,
     serverInfo: string = '',
     onChunk?: (text: string) => void,
-    onComplete?: (finalText: string) => void
+    onComplete?: (finalText: string) => void,
+    signal?: AbortSignal
   ): Promise<string> {
     const config = ensureConfig(this.getConfig())
     const finalText = await streamAIProxyMessages(
       buildSolutionMessages(title, description, severity, serverInfo, true),
       config,
-      onChunk
+      onChunk,
+      signal
     )
 
     onComplete?.(finalText)
@@ -295,10 +297,11 @@ export class AIService {
   async chatStream(
     messages: AIChatMessage[],
     onChunk?: (text: string) => void,
-    onComplete?: (finalText: string) => void
+    onComplete?: (finalText: string) => void,
+    signal?: AbortSignal
   ): Promise<string> {
     const config = ensureConfig(this.getConfig())
-    const finalText = await streamAIProxyMessages(messages, config, onChunk)
+    const finalText = await streamAIProxyMessages(messages, config, onChunk, signal)
     onComplete?.(finalText)
     return finalText
   }
@@ -307,7 +310,8 @@ export class AIService {
     logContent: string,
     logSource?: string,
     onChunk?: (chunk: string) => void,
-    onComplete?: (finalText: string) => void
+    onComplete?: (finalText: string) => void,
+    signal?: AbortSignal
   ): Promise<string> {
     const messages: AIChatMessage[] = [
       {
@@ -320,7 +324,7 @@ export class AIService {
       },
     ]
 
-    return this.chatStream(messages, onChunk, onComplete)
+    return this.chatStream(messages, onChunk, onComplete, signal)
   }
 
   async analyzeCommandOutputStream(

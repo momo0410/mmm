@@ -273,7 +273,8 @@ function flushStreamBuffer(
 export async function streamAIProxyMessages(
   messages: AIChatMessage[],
   config: AIProviderConfig,
-  onChunk?: (chunk: string) => void
+  onChunk?: (chunk: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   const provider = normalizeProvider(config)
   const response = await fetch(`${PYTHON_API_BASE_URL}/ai/chat-proxy`, {
@@ -287,6 +288,7 @@ export async function streamAIProxyMessages(
       body: buildRequestBody(messages, config, provider, true),
       timeout_seconds: config.timeoutSeconds ?? 90,
     }),
+    signal,
   })
 
   if (!response.ok) {
