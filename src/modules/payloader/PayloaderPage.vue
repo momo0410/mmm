@@ -254,7 +254,7 @@
                   <p class="payloader-agent-running-text">正在对 {{ pentestTarget || '目标资产' }} 执行智能分析...</p>
                   <p class="payloader-agent-running-sub">
                     <span class="payloader-agent-phase-badge">{{ getPhaseLabel(agentResult?.phase) }}</span>
-                    <span v-if="agentResult?.actions_count" class="payloader-agent-round-info">第 {{ agentResult.actions_count }} 步</span>
+                    <span v-if="agentRoundCount > 0" class="payloader-agent-round-info">第 {{ agentRoundCount }} 轮任务</span>
                     <span class="payloader-agent-pulse"></span>
                   </p>
                 </div>
@@ -266,8 +266,8 @@
                     <span class="payloader-agent-live-value">{{ getPhaseLabel(agentResult.phase) }}</span>
                   </div>
                   <div class="payloader-agent-live-stat">
-                    <span class="payloader-agent-live-label">已执行动作</span>
-                    <span class="payloader-agent-live-value">{{ agentResult.actions_count || 0 }} 步</span>
+                    <span class="payloader-agent-live-label">任务轮次</span>
+                    <span class="payloader-agent-live-value">{{ agentRoundCount || 0 }} 轮</span>
                   </div>
                   <div class="payloader-agent-live-stat">
                     <span class="payloader-agent-live-label">资产发现</span>
@@ -287,23 +287,23 @@
                 <div class="payloader-agent-live-log payloader-agent-live-log--compact">
                   <div class="payloader-agent-live-log-header">
                     <h4>执行摘要</h4>
-                    <span>{{ compactActionItems.length }} / {{ (agentResult.actions || []).length }} 条</span>
+                    <span>{{ compactRoundItems.length }} / {{ agentRoundCount || 0 }} 轮</span>
                   </div>
-                  <div class="payloader-agent-log-hint">详细参数和完整输出请点击右上角“日志”查看。</div>
-                  <div v-if="compactActionItems.length > 0" class="payloader-agent-compact-list">
-                    <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item" :class="{ 'payloader-agent-action-running': action.status === 'running' }">
+                  <div class="payloader-agent-log-hint">页面仅展示任务轮次概况，不显示具体动作、参数和原始输出。</div>
+                  <div v-if="compactRoundItems.length > 0" class="payloader-agent-compact-list">
+                    <div v-for="(round, idx) in compactRoundItems" :key="`${round.key}-${idx}`" class="payloader-agent-compact-item" :class="{ 'payloader-agent-action-running': round.hasRunning }">
                       <div class="payloader-agent-compact-top">
-                        <span class="payloader-agent-action-tool" :class="{ 'payloader-agent-action-tool-active': action.status === 'running' }">{{ formatActionToolLabel(action.tool) }}</span>
-                        <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
-                        <span v-if="action.status === 'running'" class="payloader-agent-action-status-running">执行中</span>
+                        <span class="payloader-agent-action-tool" :class="{ 'payloader-agent-action-tool-active': round.hasRunning }">{{ round.title }}</span>
+                        <span class="payloader-agent-action-time">{{ formatActionTime(round.time) }}</span>
+                        <span v-if="round.hasRunning" class="payloader-agent-action-status-running">执行中</span>
                       </div>
                       <div class="payloader-agent-compact-line">
-                        <span class="payloader-agent-action-label">参数</span>
-                        <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.args, '无参数') }}</span>
+                        <span class="payloader-agent-action-label">概况</span>
+                        <span class="payloader-agent-compact-text">{{ round.summary }}</span>
                       </div>
                       <div class="payloader-agent-compact-line">
-                        <span class="payloader-agent-action-label">输出</span>
-                        <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.result, action.status === 'running' ? '等待输出...' : '暂无输出') }}</span>
+                        <span class="payloader-agent-action-label">状态</span>
+                        <span class="payloader-agent-compact-text">{{ round.statusSummary }}</span>
                       </div>
                     </div>
                   </div>
@@ -331,7 +331,7 @@
                 </div>
                 <p class="payloader-agent-summary-text">
                   当前阶段：{{ getPhaseLabel(agentResult.final?.phase || agentResult.phase) }}，
-                  已执行动作 {{ agentResult.actions_count || 0 }} 步，
+                  已完成 {{ agentRoundCount || 0 }} 轮任务，
                   发现资产 {{ agentResult.findings_count || 0 }} 项，
                   发现漏洞 {{ agentResult.vuln_count || 0 }} 项。
                 </p>
@@ -345,20 +345,20 @@
                   </svg>
                   AI 执行摘要
                 </h4>
-                <div class="payloader-agent-log-hint">页面仅展示最近摘要，完整执行过程、参数和输出请查看右上角“日志”。</div>
+                <div class="payloader-agent-log-hint">页面仅展示最近任务轮次概况，不显示具体动作、参数和原始输出。</div>
                 <div class="payloader-agent-compact-list">
-                  <div v-for="(action, idx) in compactActionItems" :key="`${action.time}-${idx}`" class="payloader-agent-compact-item">
+                  <div v-for="(round, idx) in compactRoundItems" :key="`${round.key}-${idx}`" class="payloader-agent-compact-item">
                     <div class="payloader-agent-compact-top">
-                      <span class="payloader-agent-action-tool">{{ formatActionToolLabel(action.tool) }}</span>
-                      <span class="payloader-agent-action-time">{{ formatActionTime(action.time) }}</span>
+                      <span class="payloader-agent-action-tool">{{ round.title }}</span>
+                      <span class="payloader-agent-action-time">{{ formatActionTime(round.time) }}</span>
                     </div>
                     <div class="payloader-agent-compact-line">
-                      <span class="payloader-agent-action-label">参数</span>
-                      <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.args, '无参数') }}</span>
+                      <span class="payloader-agent-action-label">概况</span>
+                      <span class="payloader-agent-compact-text">{{ round.summary }}</span>
                     </div>
                     <div class="payloader-agent-compact-line">
-                      <span class="payloader-agent-action-label">输出</span>
-                      <span class="payloader-agent-compact-text">{{ summarizeActionPayload(action.result, '暂无输出') }}</span>
+                      <span class="payloader-agent-action-label">状态</span>
+                      <span class="payloader-agent-compact-text">{{ round.statusSummary }}</span>
                     </div>
                   </div>
                 </div>
@@ -592,7 +592,7 @@
           <div class="payloader-modal payloader-modal--log">
           <div class="payloader-modal-header">
             <div class="payloader-log-header-main">
-              <h3>执行日志 ({{ logRounds.length }} 轮 / {{ logData.length }} 条任务)</h3>
+              <h3>任务日志 ({{ logRounds.length }} 轮 / {{ logData.length }} 条任务)</h3>
               <p v-if="currentLogTaskId" class="payloader-log-header-sub">
                 任务 {{ currentLogTaskId }} · 当前阶段 {{ getPhaseLabel(logPhase) }}
               </p>
@@ -625,7 +625,7 @@
                     type="button"
                     @click="scrollLogDetailsIntoView"
                   >
-                    查看日志详情
+                    查看轮次详情
                   </button>
                 </div>
                 <div class="payloader-agent-report-content" v-html="renderReportMarkdown(logReport)"></div>
@@ -641,7 +641,7 @@
               class="payloader-log-round-group"
             >
               <div class="payloader-log-round-header">
-                <span class="payloader-log-round">Round {{ round.round ?? roundIdx + 1 }}</span>
+                <span class="payloader-log-round">第 {{ round.round ?? roundIdx + 1 }} 轮任务</span>
                 <span class="payloader-log-round-count">{{ round.actions.length }} 个任务</span>
                 <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
               </div>
@@ -649,36 +649,25 @@
                 <div class="payloader-log-think-label">🤖 AI 决策</div>
                 <pre class="payloader-log-think-content">{{ formatActionPayload(round.llm_decision, '[暂无决策记录]') }}</pre>
               </div>
-              <div v-for="(log, actionIdx) in round.actions" :key="log.id || `${round.key}-${actionIdx}`" class="payloader-log-entry">
+              <div class="payloader-log-entry">
                 <div class="payloader-log-meta">
-                  <span v-if="log.task_label" class="payloader-log-task">{{ log.task_label }}</span>
-                  <span class="payloader-log-tool">{{ formatActionToolLabel(log.tool) }}</span>
-                  <span v-if="log.surface" class="payloader-log-surface">{{ log.surface }}</span>
-                  <span :class="['payloader-log-status', `payloader-log-status--${log.status || 'completed'}`]">
-                    {{ getLogStatusLabel(log.status) }}
+                  <span class="payloader-log-tool">{{ summarizeRoundTaskType(round.actions) }}</span>
+                  <span :class="['payloader-log-status', `payloader-log-status--${round.statusClass}`]">
+                    {{ round.statusText }}
                   </span>
-                  <span class="payloader-log-time">{{ formatActionTime(log.time) }}</span>
-                  <span v-if="log.returncode !== null" :class="['payloader-log-rc', log.returncode === 0 ? 'ok' : 'err']">rc={{ log.returncode }}</span>
+                  <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
                 </div>
-                <div v-if="log.purpose" class="payloader-log-args">
-                  <div class="payloader-log-args-label">🎯 目的</div>
-                  <pre class="payloader-log-code">{{ formatActionPayload(log.purpose, '暂无目的说明') }}</pre>
+                <div class="payloader-log-args">
+                  <div class="payloader-log-args-label">📋 轮次概况</div>
+                  <pre class="payloader-log-code">{{ round.summary }}</pre>
                 </div>
-                <div v-if="log.args" class="payloader-log-args">
-                  <div class="payloader-log-args-label">📌 参数</div>
-                  <pre class="payloader-log-code">{{ formatActionPayload(log.args, '无参数') }}</pre>
+                <div v-if="round.surfaceSummary" class="payloader-log-args">
+                  <div class="payloader-log-args-label">🧭 涉及范围</div>
+                  <pre class="payloader-log-code">{{ round.surfaceSummary }}</pre>
                 </div>
-                <div v-if="log.capabilities?.length" class="payloader-log-args">
-                  <div class="payloader-log-args-label">🧠 能力</div>
-                  <pre class="payloader-log-code">{{ log.capabilities.join(', ') }}</pre>
-                </div>
-                <div v-if="log.full_stdout || log.result || log.status === 'running'" class="payloader-log-stdout">
-                  <div class="payloader-log-stdout-label">📤 原始输出</div>
-                  <pre class="payloader-log-code">{{ formatActionPayload(log.full_stdout || log.result, log.status === 'running' ? '工具执行中，等待输出...' : '暂无输出') }}</pre>
-                </div>
-                <div v-if="log.error" class="payloader-log-error">
-                  <div class="payloader-log-error-label">❌ 错误</div>
-                  <pre class="payloader-log-code">{{ formatActionPayload(log.error, '暂无错误信息') }}</pre>
+                <div class="payloader-log-stdout">
+                  <div class="payloader-log-stdout-label">📌 执行状态</div>
+                  <pre class="payloader-log-code">{{ round.statusSummary }}</pre>
                 </div>
               </div>
             </div>
@@ -1348,20 +1337,103 @@ function getPhaseLabel(phase: string | undefined) {
   }
 }
 
-function formatActionToolLabel(tool?: string) {
-  const toolLabel: Record<string, string> = {
-    _llm_wait: 'AI 规划',
-    nmap: '端口扫描',
-    msfconsole: '漏洞利用',
-    hydra: '密码爆破',
-    shell: '命令执行',
-    searchsploit: '漏洞搜索',
-    nuclei: '漏洞扫描',
-    sqlmap: 'SQL注入检测',
-    ffuf: '目录扫描',
-    nikto: 'Web扫描',
-  };
-  return toolLabel[String(tool || '')] || String(tool || 'unknown');
+function countTaskRounds(actions: Array<Record<string, any>> | undefined | null) {
+  const list = Array.isArray(actions) ? actions : [];
+  if (list.length === 0) return 0;
+
+  const rounds = new Set<number>();
+  list.forEach((item) => {
+    if (typeof item?.round === 'number' && Number.isFinite(item.round)) {
+      rounds.add(item.round);
+    }
+  });
+  if (rounds.size > 0) {
+    return rounds.size;
+  }
+
+  const llmRounds = list.filter((item) => String(item?.tool || '').trim() === '_llm_wait').length;
+  if (llmRounds > 0) {
+    return llmRounds;
+  }
+
+  const actionable = list.filter((item) => String(item?.tool || '').trim() !== '_llm_wait');
+  return actionable.length > 0 ? 1 : 0;
+}
+
+function summarizeRoundTaskType(actions: PentestLogEntry[]) {
+  const surfaces = Array.from(new Set(
+    actions
+      .map((item) => String(item.surface || '').trim())
+      .filter(Boolean)
+  )).slice(0, 3);
+
+  if (surfaces.length > 0) {
+    return `任务范围：${surfaces.join(' / ')}`;
+  }
+  return '任务轮次概要';
+}
+
+function buildRoundSummary(actions: PentestLogEntry[]) {
+  const total = actions.length;
+  const running = actions.filter((item) => item.status === 'running').length;
+  const failed = actions.filter((item) =>
+    item.status === 'failed' || !!item.error || (typeof item.returncode === 'number' && item.returncode !== 0)
+  ).length;
+  const completed = Math.max(0, total - running - failed);
+  const capabilityCount = Array.from(new Set(actions.flatMap((item) => item.capabilities || []))).length;
+
+  return [
+    `本轮共编排 ${total} 个任务`,
+    completed > 0 ? `${completed} 个已完成` : '',
+    running > 0 ? `${running} 个进行中` : '',
+    failed > 0 ? `${failed} 个需复核` : '',
+    capabilityCount > 0 ? `覆盖 ${capabilityCount} 类能力` : '',
+  ].filter(Boolean).join('，');
+}
+
+function buildRoundStatusSummary(actions: PentestLogEntry[]) {
+  const running = actions.filter((item) => item.status === 'running').length;
+  const failed = actions.filter((item) =>
+    item.status === 'failed' || !!item.error || (typeof item.returncode === 'number' && item.returncode !== 0)
+  ).length;
+
+  if (running > 0) {
+    return `本轮仍在推进，当前有 ${running} 个任务执行中。`;
+  }
+  if (failed > 0) {
+    return `本轮已结束，其中 ${failed} 个任务结果异常，建议结合报告继续复核。`;
+  }
+  return '本轮任务已完成，详细过程已收敛为轮次总结。';
+}
+
+function buildRoundSurfaceSummary(actions: PentestLogEntry[]) {
+  const surfaces = Array.from(new Set(
+    actions
+      .map((item) => String(item.surface || '').trim())
+      .filter(Boolean)
+  ));
+  const capabilities = Array.from(new Set(actions.flatMap((item) => item.capabilities || [])));
+  const parts: string[] = [];
+  if (surfaces.length > 0) {
+    parts.push(`涉及面：${surfaces.slice(0, 4).join('、')}`);
+  }
+  if (capabilities.length > 0) {
+    parts.push(`能力域：${capabilities.slice(0, 4).join('、')}`);
+  }
+  return parts.join('；');
+}
+
+function getRoundStatusClass(actions: PentestLogEntry[]) {
+  if (actions.some((item) => item.status === 'running')) return 'running';
+  if (actions.some((item) => item.status === 'failed' || !!item.error || (typeof item.returncode === 'number' && item.returncode !== 0))) return 'failed';
+  return 'completed';
+}
+
+function getRoundStatusText(actions: PentestLogEntry[]) {
+  const statusClass = getRoundStatusClass(actions);
+  if (statusClass === 'running') return '执行中';
+  if (statusClass === 'failed') return '待复核';
+  return '已完成';
 }
 
 const currentActionSummary = computed(() => {
@@ -1369,11 +1441,10 @@ const currentActionSummary = computed(() => {
   const latest = agentResult.value.actions[agentResult.value.actions.length - 1];
   if (!latest) return '';
   if (latest.tool === '_llm_wait') {
-    return 'AI 正在分析当前态势，规划下一步操作...';
+    return 'AI 正在分析当前态势，规划下一轮任务...';
   }
   if (latest.status === 'running') {
-    const label = formatActionToolLabel(latest.tool);
-    return `正在执行: ${label}`;
+    return '当前轮次任务正在执行中';
   }
   return '';
 });
@@ -1390,10 +1461,59 @@ const currentPlanningStream = computed(() => {
 const currentActionElapsed = ref('');
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
-const compactActionItems = computed(() => {
-  const actions = Array.isArray(agentResult.value?.actions) ? agentResult.value.actions : [];
-  return actions.slice(-3).reverse();
+const compactRoundItems = computed<PentestLogRound[]>(() => {
+  const actions = (Array.isArray(agentResult.value?.actions) ? agentResult.value.actions : [])
+    .map((item: any) => normalizeLogEntry(item));
+  if (actions.length === 0) {
+    return [];
+  }
+
+  const grouped = new Map<string, PentestLogRound>();
+  actions.forEach((action: PentestLogEntry, index: number) => {
+    const round = typeof (action as any).round === 'number' ? (action as any).round : null;
+    const key = round !== null ? `round-${round}` : `single-${index}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        round,
+        time: action.time,
+        llm_decision: action.llm_decision,
+        actions: [],
+        summary: '',
+        statusSummary: '',
+        surfaceSummary: '',
+        statusClass: 'completed',
+        statusText: '已完成',
+        hasRunning: false,
+        title: `第 ${round ?? grouped.size + 1} 轮任务`,
+      });
+    }
+    const group = grouped.get(key)!;
+    if (!group.time && action.time) {
+      group.time = action.time;
+    }
+    if (!group.llm_decision && action.llm_decision) {
+      group.llm_decision = action.llm_decision;
+    }
+    group.actions.push(action);
+  });
+
+  return Array.from(grouped.values())
+    .map((group, index) => {
+      group.summary = buildRoundSummary(group.actions);
+      group.statusSummary = buildRoundStatusSummary(group.actions);
+      group.surfaceSummary = buildRoundSurfaceSummary(group.actions);
+      group.statusClass = getRoundStatusClass(group.actions);
+      group.statusText = getRoundStatusText(group.actions);
+      group.hasRunning = group.statusClass === 'running';
+      group.title = `第 ${group.round ?? index + 1} 轮任务`;
+      return group;
+    })
+    .slice(-3)
+    .reverse();
 });
+
+const agentRoundCount = computed(() => countTaskRounds(agentResult.value?.actions));
 
 watch([() => agentResult.value?.actions, agentRunning], () => {
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
@@ -1704,7 +1824,7 @@ function buildFallbackPentestReport(params: {
     '',
     `- 目标: ${params.target || normalizedPentestTarget.value || '未知目标'}`,
     `- 风险等级: ${getPentestRiskLevel(params.vulnCount || 0, 0)}`,
-    `- 执行动作: ${params.actionsCount || 0} 步`,
+    `- 任务轮次: ${countTaskRounds(params.actions as Array<Record<string, any>> | undefined) || 0} 轮`,
     `- 发现资产: ${params.findingsCount || 0} 项`,
     `- 发现漏洞: ${params.vulnCount || 0} 项`,
     '',
@@ -1785,7 +1905,7 @@ function buildUserFacingPentestReport(params: {
     `- **目标**：${target}`,
     `- **结束阶段**：${phaseLabel}`,
     `- **风险等级**：${riskLevel}`,
-    `- **执行动作**：${params.actionsCount || actionableLogs.length || 0} 步`,
+    `- **任务轮次**：${countTaskRounds(actionableLogs as Array<Record<string, any>>) || 0} 轮`,
     `- **成功项**：${completedLogs.length} 项`,
     `- **失败项**：${failedLogs.length} 项`,
     `- **发现资产**：${params.findingsCount || 0} 项`,
@@ -1924,7 +2044,7 @@ async function buildInterruptedPentestSummary(taskId: string) {
         content: `目标: ${normalizedPentestTarget.value || '未知目标'}
 任务ID: ${taskId}
 中断时阶段: ${getPhaseLabel(phase)}
-已执行动作: ${actionsCount}
+任务轮次: ${countTaskRounds(normalizedLogs as Array<Record<string, any>>) || 0}
 发现资产: ${findingsCount}
 发现漏洞: ${vulnCount}
 
@@ -2123,6 +2243,13 @@ type PentestLogRound = {
   time: string;
   llm_decision: string;
   actions: PentestLogEntry[];
+  summary: string;
+  statusSummary: string;
+  surfaceSummary: string;
+  statusClass: string;
+  statusText: string;
+  hasRunning: boolean;
+  title: string;
 };
 
 const logData = ref<PentestLogEntry[]>([]);
@@ -2187,6 +2314,13 @@ const logRounds = computed<PentestLogRound[]>(() => {
         time: log.time,
         llm_decision: streamingDecision,
         actions: [],
+        summary: '',
+        statusSummary: '',
+        surfaceSummary: '',
+        statusClass: 'completed',
+        statusText: '已完成',
+        hasRunning: false,
+        title: `第 ${round ?? groups.length + 1} 轮任务`,
       };
       groupIndex.set(key, groups.length);
       groups.push(group);
@@ -2201,7 +2335,16 @@ const logRounds = computed<PentestLogRound[]>(() => {
     group.actions.push(log);
   });
 
-  return groups;
+  return groups.map((group, index) => {
+    group.summary = buildRoundSummary(group.actions);
+    group.statusSummary = buildRoundStatusSummary(group.actions);
+    group.surfaceSummary = buildRoundSurfaceSummary(group.actions);
+    group.statusClass = getRoundStatusClass(group.actions);
+    group.statusText = getRoundStatusText(group.actions);
+    group.hasRunning = group.statusClass === 'running';
+    group.title = `第 ${group.round ?? index + 1} 轮任务`;
+    return group;
+  });
 });
 
 function stopLogPolling() {
