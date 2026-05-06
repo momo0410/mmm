@@ -633,108 +633,156 @@
               <div v-if="logData.length === 0" class="payloader-log-empty">
               {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
               </div>
-            </template>
-            <div
-              v-for="(round, roundIdx) in logRounds"
-              :key="round.key"
-              ref="logDetailRefs"
-              class="payloader-log-round-group"
-            >
-              <div class="payloader-log-round-header">
-                <span class="payloader-log-round">第 {{ round.round ?? roundIdx + 1 }} 轮任务</span>
-                <span class="payloader-log-round-count">{{ round.actions.length }} 个任务</span>
-                <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
-              </div>
-              <div class="payloader-log-think">
-                <div class="payloader-log-think-label">🤖 AI 决策</div>
-                <pre class="payloader-log-think-content">{{ formatActionPayload(round.llm_decision, '[暂无决策记录]') }}</pre>
-              </div>
-              <div class="payloader-log-entry">
-                <div class="payloader-log-meta">
-                  <span class="payloader-log-tool">{{ summarizeRoundTaskType(round.actions) }}</span>
-                  <span :class="['payloader-log-status', `payloader-log-status--${round.statusClass}`]">
-                    {{ round.statusText }}
-                  </span>
-                  <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
-                </div>
-                <div class="payloader-log-args">
-                  <div class="payloader-log-args-label">📋 轮次概况</div>
-                  <pre class="payloader-log-code">{{ round.summary }}</pre>
-                </div>
-                <div v-if="round.surfaceSummary" class="payloader-log-args">
-                  <div class="payloader-log-args-label">🧭 涉及范围</div>
-                  <pre class="payloader-log-code">{{ round.surfaceSummary }}</pre>
-                </div>
-                <div class="payloader-log-stdout">
-                  <div class="payloader-log-stdout-label">📌 执行状态</div>
-                  <pre class="payloader-log-code">{{ round.statusSummary }}</pre>
-                </div>
-                <div class="payloader-log-action-list">
-                  <div class="payloader-log-section-label">任务明细</div>
-                  <div v-if="getRoundExecutionActions(round.actions).length === 0" class="payloader-log-action-empty">
-                    本轮暂无实际工具执行，当前主要是 AI 规划或等待日志落盘。
-                  </div>
+              <div v-else class="payloader-log-layout">
+                <div class="payloader-log-rounds">
                   <div
-                    v-for="(action, actionIdx) in getRoundExecutionActions(round.actions)"
-                    :key="action.id || `${round.key}-action-${actionIdx}`"
-                    class="payloader-log-action-card"
+                    v-for="(round, roundIdx) in logRounds"
+                    :key="round.key"
+                    ref="logDetailRefs"
+                    class="payloader-log-round-group"
                   >
-                    <div class="payloader-log-action-header">
-                      <div class="payloader-log-action-title-wrap">
-                        <div class="payloader-log-action-title">
-                          {{ action.task_label || action.purpose || action.tool }}
-                        </div>
-                        <div class="payloader-log-action-subtitle">
-                          {{ describeAction(action) }}
-                        </div>
+                    <div class="payloader-log-round-header">
+                      <span class="payloader-log-round">第 {{ round.round ?? roundIdx + 1 }} 轮任务</span>
+                      <span class="payloader-log-round-count">{{ round.actions.length }} 个任务</span>
+                      <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
+                    </div>
+                    <div class="payloader-log-think">
+                      <div class="payloader-log-think-label">🤖 AI 决策</div>
+                      <pre class="payloader-log-think-content">{{ formatActionPayload(round.llm_decision, '[暂无决策记录]') }}</pre>
+                    </div>
+                    <div class="payloader-log-entry">
+                      <div class="payloader-log-meta">
+                        <span class="payloader-log-tool">{{ summarizeRoundTaskType(round.actions) }}</span>
+                        <span :class="['payloader-log-status', `payloader-log-status--${round.statusClass}`]">
+                          {{ round.statusText }}
+                        </span>
+                        <span class="payloader-log-time">{{ formatActionTime(round.time) }}</span>
                       </div>
-                      <div class="payloader-log-action-badges">
-                        <span :class="['payloader-log-status', `payloader-log-status--${getActionStatusClass(action)}`]">
-                          {{ getLogStatusLabel(action.status) }}
-                        </span>
-                        <span v-if="action.returncode !== null" :class="['payloader-log-rc', action.returncode === 0 ? 'ok' : 'err']">
-                          rc={{ action.returncode }}
-                        </span>
+                      <div class="payloader-log-args">
+                        <div class="payloader-log-args-label">📋 轮次概况</div>
+                        <pre class="payloader-log-code">{{ round.summary }}</pre>
+                      </div>
+                      <div v-if="round.surfaceSummary" class="payloader-log-args">
+                        <div class="payloader-log-args-label">🧭 涉及范围</div>
+                        <pre class="payloader-log-code">{{ round.surfaceSummary }}</pre>
+                      </div>
+                      <div class="payloader-log-stdout">
+                        <div class="payloader-log-stdout-label">📌 执行状态</div>
+                        <pre class="payloader-log-code">{{ round.statusSummary }}</pre>
+                      </div>
+                      <div class="payloader-log-action-list">
+                        <div class="payloader-log-section-label">任务明细</div>
+                        <div v-if="getRoundExecutionActions(round.actions).length === 0" class="payloader-log-action-empty">
+                          本轮暂无实际工具执行，当前主要是 AI 规划或等待日志落盘。
+                        </div>
+                        <div
+                          v-for="(action, actionIdx) in getRoundExecutionActions(round.actions)"
+                          :key="action.id || `${round.key}-action-${actionIdx}`"
+                          class="payloader-log-action-card"
+                        >
+                          <div class="payloader-log-action-header">
+                            <div class="payloader-log-action-title-wrap">
+                              <div class="payloader-log-action-title">
+                                {{ action.task_label || action.purpose || action.tool }}
+                              </div>
+                              <div class="payloader-log-action-subtitle">
+                                {{ describeAction(action) }}
+                              </div>
+                            </div>
+                            <div class="payloader-log-action-badges">
+                              <span :class="['payloader-log-status', `payloader-log-status--${getActionStatusClass(action)}`]">
+                                {{ getLogStatusLabel(action.status) }}
+                              </span>
+                              <span v-if="action.returncode !== null" :class="['payloader-log-rc', action.returncode === 0 ? 'ok' : 'err']">
+                                rc={{ action.returncode }}
+                              </span>
+                            </div>
+                          </div>
+                          <div class="payloader-log-action-grid">
+                            <div class="payloader-log-action-field">
+                              <span class="payloader-log-action-field-label">工具</span>
+                              <span class="payloader-log-action-field-value">{{ action.tool }}</span>
+                            </div>
+                            <div v-if="action.surface" class="payloader-log-action-field">
+                              <span class="payloader-log-action-field-label">攻击面</span>
+                              <span class="payloader-log-action-field-value">{{ action.surface }}</span>
+                            </div>
+                            <div v-if="action.purpose" class="payloader-log-action-field payloader-log-action-field--wide">
+                              <span class="payloader-log-action-field-label">目的</span>
+                              <span class="payloader-log-action-field-value">{{ action.purpose }}</span>
+                            </div>
+                            <div class="payloader-log-action-field">
+                              <span class="payloader-log-action-field-label">执行模式</span>
+                              <span class="payloader-log-action-field-value">{{ formatExecutionMode(action.execution_mode) }}</span>
+                            </div>
+                            <div v-if="action.timeout_seconds" class="payloader-log-action-field">
+                              <span class="payloader-log-action-field-label">超时预算</span>
+                              <span class="payloader-log-action-field-value">{{ Math.round(action.timeout_seconds) }}s</span>
+                            </div>
+                            <div v-if="action.pid" class="payloader-log-action-field">
+                              <span class="payloader-log-action-field-label">进程 PID</span>
+                              <span class="payloader-log-action-field-value">{{ action.pid }}</span>
+                            </div>
+                            <div class="payloader-log-action-field payloader-log-action-field--wide">
+                              <span class="payloader-log-action-field-label">执行结论</span>
+                              <span class="payloader-log-action-field-value">{{ summarizeActionOutcome(action) }}</span>
+                            </div>
+                          </div>
+                          <div class="payloader-log-action-toolbar">
+                            <button
+                              type="button"
+                              class="payloader-log-action-terminal-btn"
+                              @click="selectTerminalAction(action)"
+                            >
+                              {{ selectedLogActionId === action.id ? '正在查看终端过程' : '查看实时终端过程' }}
+                            </button>
+                          </div>
+                          <details v-if="action.args" class="payloader-log-detail-block">
+                            <summary>执行参数</summary>
+                            <pre class="payloader-log-code">{{ formatActionPayload(action.args, '') }}</pre>
+                          </details>
+                          <details v-if="action.error" class="payloader-log-detail-block payloader-log-detail-block--error" open>
+                            <summary>错误信息</summary>
+                            <pre class="payloader-log-code">{{ formatActionPayload(action.error, '') }}</pre>
+                          </details>
+                          <details v-if="getPrimaryActionOutput(action)" class="payloader-log-detail-block">
+                            <summary>结果摘要</summary>
+                            <pre class="payloader-log-code">{{ getPrimaryActionOutput(action) }}</pre>
+                          </details>
+                          <details v-if="shouldShowRawOutput(action)" class="payloader-log-detail-block">
+                            <summary>原始输出</summary>
+                            <pre class="payloader-log-code">{{ getRawActionOutput(action) }}</pre>
+                          </details>
+                        </div>
                       </div>
                     </div>
-                    <div class="payloader-log-action-grid">
-                      <div class="payloader-log-action-field">
-                        <span class="payloader-log-action-field-label">工具</span>
-                        <span class="payloader-log-action-field-value">{{ action.tool }}</span>
-                      </div>
-                      <div v-if="action.surface" class="payloader-log-action-field">
-                        <span class="payloader-log-action-field-label">攻击面</span>
-                        <span class="payloader-log-action-field-value">{{ action.surface }}</span>
-                      </div>
-                      <div v-if="action.purpose" class="payloader-log-action-field payloader-log-action-field--wide">
-                        <span class="payloader-log-action-field-label">目的</span>
-                        <span class="payloader-log-action-field-value">{{ action.purpose }}</span>
-                      </div>
-                      <div class="payloader-log-action-field payloader-log-action-field--wide">
-                        <span class="payloader-log-action-field-label">执行结论</span>
-                        <span class="payloader-log-action-field-value">{{ summarizeActionOutcome(action) }}</span>
-                      </div>
-                    </div>
-                    <details v-if="action.args" class="payloader-log-detail-block">
-                      <summary>执行参数</summary>
-                      <pre class="payloader-log-code">{{ formatActionPayload(action.args, '') }}</pre>
-                    </details>
-                    <details v-if="action.error" class="payloader-log-detail-block payloader-log-detail-block--error" open>
-                      <summary>错误信息</summary>
-                      <pre class="payloader-log-code">{{ formatActionPayload(action.error, '') }}</pre>
-                    </details>
-                    <details v-if="getPrimaryActionOutput(action)" class="payloader-log-detail-block">
-                      <summary>结果摘要</summary>
-                      <pre class="payloader-log-code">{{ getPrimaryActionOutput(action) }}</pre>
-                    </details>
-                    <details v-if="shouldShowRawOutput(action)" class="payloader-log-detail-block">
-                      <summary>原始输出</summary>
-                      <pre class="payloader-log-code">{{ getRawActionOutput(action) }}</pre>
-                    </details>
                   </div>
                 </div>
+                <aside class="payloader-log-terminal-panel">
+                  <div class="payloader-log-terminal-header">
+                    <div>
+                      <div class="payloader-log-terminal-eyebrow">实时终端过程</div>
+                      <h4>{{ selectedLogAction?.task_label || selectedLogAction?.purpose || selectedLogAction?.tool || '暂无选中任务' }}</h4>
+                    </div>
+                    <span v-if="selectedLogAction" :class="['payloader-log-status', `payloader-log-status--${getActionStatusClass(selectedLogAction)}`]">
+                      {{ getLogStatusLabel(selectedLogAction.status) }}
+                    </span>
+                  </div>
+                  <div v-if="selectedLogAction" class="payloader-log-terminal-meta">
+                    <span>{{ formatExecutionMode(selectedLogAction.execution_mode) }}</span>
+                    <span v-if="selectedLogAction.pid">PID {{ selectedLogAction.pid }}</span>
+                    <span v-if="selectedLogAction.timeout_seconds">{{ Math.round(selectedLogAction.timeout_seconds) }}s</span>
+                    <span>{{ formatActionTime(selectedLogAction.updated_at || selectedLogAction.time) }}</span>
+                  </div>
+                  <div v-if="selectedLogAction" class="payloader-log-terminal-body">
+                    <pre class="payloader-log-terminal-output">{{ getTerminalPanelOutput(selectedLogAction) || '[当前尚无终端输出]' }}</pre>
+                  </div>
+                  <div v-else class="payloader-log-terminal-empty">
+                    选择一条已执行任务后，这里会持续显示它的实时终端输出。
+                  </div>
+                </aside>
               </div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -2299,6 +2347,10 @@ type PentestLogEntry = {
   task_label?: string;
   ports?: number[];
   capabilities?: string[];
+  execution_mode?: string;
+  pid?: number | null;
+  timeout_seconds?: number | null;
+  streaming?: boolean;
 };
 
 type PentestLogRound = {
@@ -2323,6 +2375,7 @@ const logPhase = ref<string>('init');
 const currentLogTaskId = ref('');
 const logReport = ref('');
 const logDetailRefs = ref<HTMLElement[]>([]);
+const selectedLogActionId = ref('');
 
 let logTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -2399,6 +2452,48 @@ function shouldShowRawOutput(action: PentestLogEntry) {
   return !!raw && raw !== primary;
 }
 
+function formatExecutionMode(mode: string | undefined) {
+  switch ((mode || "").toLowerCase()) {
+    case "pty":
+      return "PTY 实时流";
+    case "pipe":
+      return "管道流";
+    default:
+      return "标准执行";
+  }
+}
+
+function getTerminalPanelOutput(action: PentestLogEntry | undefined) {
+  if (!action) return "";
+  return getRawActionOutput(action) || getPrimaryActionOutput(action) || formatActionPayload(action.error, "");
+}
+
+function selectTerminalAction(action: PentestLogEntry) {
+  selectedLogActionId.value = action.id || "";
+}
+
+function pickPreferredTerminalAction(actions: PentestLogEntry[]) {
+  const executable = getRoundExecutionActions(actions);
+  if (executable.length === 0) return undefined;
+  return executable.find((item) => item.status === "running") || executable[executable.length - 1];
+}
+
+function syncSelectedTerminalAction() {
+  const allActions = logData.value.filter((item) => item.tool !== "_llm_wait");
+  if (allActions.length === 0) {
+    selectedLogActionId.value = "";
+    return;
+  }
+  if (selectedLogActionId.value) {
+    const stillExists = allActions.some((item) => item.id === selectedLogActionId.value);
+    if (stillExists) {
+      return;
+    }
+  }
+  const preferred = pickPreferredTerminalAction(allActions);
+  selectedLogActionId.value = preferred?.id || "";
+}
+
 function normalizeLogEntry(log: Record<string, unknown>) {
   return {
     id: typeof log.id === 'string' ? log.id : undefined,
@@ -2416,8 +2511,19 @@ function normalizeLogEntry(log: Record<string, unknown>) {
     purpose: stripAnsiEscapeCodes(typeof log.purpose === 'string' ? log.purpose : ''),
     round: typeof log.round === 'number' ? log.round : undefined,
     task_label: typeof log.task_label === 'string' ? log.task_label : '',
+    execution_mode: typeof log.execution_mode === 'string' ? log.execution_mode : '',
+    pid: typeof log.pid === 'number' ? log.pid : null,
+    timeout_seconds: typeof log.timeout_seconds === 'number' ? log.timeout_seconds : null,
+    streaming: typeof log.streaming === 'boolean' ? log.streaming : false,
   };
 }
+
+const selectedLogAction = computed<PentestLogEntry | undefined>(() => {
+  if (!selectedLogActionId.value) {
+    return pickPreferredTerminalAction(logData.value);
+  }
+  return logData.value.find((item) => item.id === selectedLogActionId.value) || pickPreferredTerminalAction(logData.value);
+});
 
 const logRounds = computed<PentestLogRound[]>(() => {
   const groups: PentestLogRound[] = [];
@@ -2517,6 +2623,7 @@ async function openLogModal(taskId?: string) {
 function closeLogModal() {
   stopLogPolling();
   showLogModal.value = false;
+  selectedLogActionId.value = "";
 }
 
 async function loadLogs(taskId?: string, silent = false) {
@@ -2536,6 +2643,7 @@ async function loadLogs(taskId?: string, silent = false) {
     ]);
     logPhase.value = logRes.phase || reportRes?.phase || 'init';
     logData.value = (logRes.actions || []).map(normalizeLogEntry);
+    syncSelectedTerminalAction();
     const fallbackReport = tid === currentTaskId.value
       ? String(agentResult.value?.final?.report || '').trim()
       : '';
@@ -2548,6 +2656,10 @@ async function loadLogs(taskId?: string, silent = false) {
     syncLogPolling();
   }
 }
+
+watch(logData, () => {
+  syncSelectedTerminalAction();
+}, { deep: true });
 
 function scrollLogDetailsIntoView() {
   const firstDetail = logDetailRefs.value[0];
@@ -5124,6 +5236,91 @@ onMounted(() => {
   padding: 16px;
 }
 
+.payloader-log-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.payloader-log-rounds {
+  min-width: 0;
+}
+
+.payloader-log-terminal-panel {
+  position: sticky;
+  top: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.payloader-log-terminal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.payloader-log-terminal-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.payloader-log-terminal-header h4 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.payloader-log-terminal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.payloader-log-terminal-body {
+  flex: 1;
+  min-height: 0;
+  background: #0b1220;
+}
+
+.payloader-log-terminal-output {
+  margin: 0;
+  padding: 14px 16px;
+  min-height: 100%;
+  max-height: 68vh;
+  overflow: auto;
+  color: #dbeafe;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.payloader-log-terminal-empty {
+  padding: 18px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .payloader-log-report-section {
   margin-bottom: 18px;
   border: 1px solid var(--border-color);
@@ -5409,6 +5606,30 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.payloader-log-action-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.payloader-log-action-terminal-btn {
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.payloader-log-action-terminal-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .payloader-log-action-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5495,6 +5716,16 @@ onMounted(() => {
 
 .payloader-log-detail-block--error summary {
   color: var(--error-color);
+}
+
+@media (max-width: 1180px) {
+  .payloader-log-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .payloader-log-terminal-panel {
+    position: static;
+  }
 }
 
 @media (max-width: 900px) {

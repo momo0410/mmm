@@ -560,6 +560,10 @@ class PythonApi {
         task_label?: string;
         ports?: number[];
         capabilities?: string[];
+        execution_mode?: string;
+        pid?: number | null;
+        timeout_seconds?: number | null;
+        streaming?: boolean;
       }>;
       task_id: string;
     }>('GET', '/agent/pentest/logs', undefined, { task_id: taskId });
