@@ -669,6 +669,70 @@
                   <div class="payloader-log-stdout-label">📌 执行状态</div>
                   <pre class="payloader-log-code">{{ round.statusSummary }}</pre>
                 </div>
+                <div class="payloader-log-action-list">
+                  <div class="payloader-log-section-label">任务明细</div>
+                  <div v-if="getRoundExecutionActions(round.actions).length === 0" class="payloader-log-action-empty">
+                    本轮暂无实际工具执行，当前主要是 AI 规划或等待日志落盘。
+                  </div>
+                  <div
+                    v-for="(action, actionIdx) in getRoundExecutionActions(round.actions)"
+                    :key="action.id || `${round.key}-action-${actionIdx}`"
+                    class="payloader-log-action-card"
+                  >
+                    <div class="payloader-log-action-header">
+                      <div class="payloader-log-action-title-wrap">
+                        <div class="payloader-log-action-title">
+                          {{ action.task_label || action.purpose || action.tool }}
+                        </div>
+                        <div class="payloader-log-action-subtitle">
+                          {{ describeAction(action) }}
+                        </div>
+                      </div>
+                      <div class="payloader-log-action-badges">
+                        <span :class="['payloader-log-status', `payloader-log-status--${getActionStatusClass(action)}`]">
+                          {{ getLogStatusLabel(action.status) }}
+                        </span>
+                        <span v-if="action.returncode !== null" :class="['payloader-log-rc', action.returncode === 0 ? 'ok' : 'err']">
+                          rc={{ action.returncode }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="payloader-log-action-grid">
+                      <div class="payloader-log-action-field">
+                        <span class="payloader-log-action-field-label">工具</span>
+                        <span class="payloader-log-action-field-value">{{ action.tool }}</span>
+                      </div>
+                      <div v-if="action.surface" class="payloader-log-action-field">
+                        <span class="payloader-log-action-field-label">攻击面</span>
+                        <span class="payloader-log-action-field-value">{{ action.surface }}</span>
+                      </div>
+                      <div v-if="action.purpose" class="payloader-log-action-field payloader-log-action-field--wide">
+                        <span class="payloader-log-action-field-label">目的</span>
+                        <span class="payloader-log-action-field-value">{{ action.purpose }}</span>
+                      </div>
+                      <div class="payloader-log-action-field payloader-log-action-field--wide">
+                        <span class="payloader-log-action-field-label">执行结论</span>
+                        <span class="payloader-log-action-field-value">{{ summarizeActionOutcome(action) }}</span>
+                      </div>
+                    </div>
+                    <details v-if="action.args" class="payloader-log-detail-block">
+                      <summary>执行参数</summary>
+                      <pre class="payloader-log-code">{{ formatActionPayload(action.args, '') }}</pre>
+                    </details>
+                    <details v-if="action.error" class="payloader-log-detail-block payloader-log-detail-block--error" open>
+                      <summary>错误信息</summary>
+                      <pre class="payloader-log-code">{{ formatActionPayload(action.error, '') }}</pre>
+                    </details>
+                    <details v-if="getPrimaryActionOutput(action)" class="payloader-log-detail-block">
+                      <summary>结果摘要</summary>
+                      <pre class="payloader-log-code">{{ getPrimaryActionOutput(action) }}</pre>
+                    </details>
+                    <details v-if="shouldShowRawOutput(action)" class="payloader-log-detail-block">
+                      <summary>原始输出</summary>
+                      <pre class="payloader-log-code">{{ getRawActionOutput(action) }}</pre>
+                    </details>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2273,6 +2337,66 @@ function getLogStatusLabel(status: string | undefined) {
     default:
       return '已完成';
   }
+}
+
+function getActionStatusClass(action: PentestLogEntry) {
+  if (action.status === 'running') return 'running';
+  if (action.status === 'dry_run') return 'dry_run';
+  if (action.status === 'failed' || !!action.error || (typeof action.returncode === 'number' && action.returncode !== 0)) {
+    return 'failed';
+  }
+  return 'completed';
+}
+
+function getRoundExecutionActions(actions: PentestLogEntry[]) {
+  return actions.filter((action) => action.tool !== '_llm_wait');
+}
+
+function describeAction(action: PentestLogEntry) {
+  const parts = [action.surface, action.purpose].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(' · ');
+  }
+  if (action.args) {
+    return summarizeActionPayload(action.args, '无参数', 140);
+  }
+  return '未记录额外说明';
+}
+
+function summarizeActionOutcome(action: PentestLogEntry) {
+  if (action.status === 'running') {
+    return '任务仍在执行，结果尚未最终落盘。';
+  }
+  if (action.error) {
+    return summarizeActionPayload(action.error, '执行失败', 180);
+  }
+  if (typeof action.returncode === 'number' && action.returncode !== 0) {
+    const output = getPrimaryActionOutput(action) || getRawActionOutput(action);
+    const detail = summarizeActionPayload(output, '命令返回非 0', 180);
+    return '命令返回码 ' + action.returncode + '。' + detail;
+  }
+  const output = getPrimaryActionOutput(action);
+  if (output) {
+    return summarizeActionPayload(output, '已完成', 180);
+  }
+  if (action.status === 'dry_run') {
+    return '本次为演练任务，未实际下发工具。';
+  }
+  return '任务已完成，但当前日志未记录更多结果内容。';
+}
+
+function getPrimaryActionOutput(action: PentestLogEntry) {
+  return formatActionPayload(action.result, '').trim();
+}
+
+function getRawActionOutput(action: PentestLogEntry) {
+  return formatActionPayload(action.full_stdout, '').trim();
+}
+
+function shouldShowRawOutput(action: PentestLogEntry) {
+  const primary = getPrimaryActionOutput(action);
+  const raw = getRawActionOutput(action);
+  return !!raw && raw !== primary;
 }
 
 function normalizeLogEntry(log: Record<string, unknown>) {
@@ -5218,6 +5342,166 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+.payloader-log-action-list {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.payloader-log-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.payloader-log-action-empty {
+  padding: 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  font-size: 13px;
+}
+
+.payloader-log-action-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  padding: 12px;
+}
+
+.payloader-log-action-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+
+.payloader-log-action-title-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.payloader-log-action-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.payloader-log-action-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.payloader-log-action-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.payloader-log-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.payloader-log-action-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  min-width: 0;
+}
+
+
+.payloader-log-action-field--wide {
+  grid-column: 1 / -1;
+}
+
+
+.payloader-log-action-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+
+.payloader-log-action-field-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.payloader-log-detail-block {
+  margin-top: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+
+.payloader-log-detail-block summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  list-style: none;
+  user-select: none;
+}
+
+
+
+.payloader-log-detail-block summary::-webkit-details-marker {
+  display: none;
+}
+
+
+
+.payloader-log-detail-block summary::before {
+  content: '▶';
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+
+.payloader-log-detail-block[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.payloader-log-detail-block .payloader-log-code {
+  margin: 0 12px 12px;
+}
+
+.payloader-log-detail-block--error summary {
+  color: var(--error-color);
+}
+
+@media (max-width: 900px) {
+  .payloader-log-action-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* ── 历史按钮 ── */
 .payloader-btn--history {
   display: flex;
