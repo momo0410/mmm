@@ -16,6 +16,6 @@ if __name__ == "__main__":
         port=3001,
         # 默认关闭 reload，避免热重载重启导致内存态 SSH 会话丢失。
         # 需要热重载时可显式设置 PY_BACKEND_RELOAD=1。
-        reload=_env_flag("PY_BACKEND_RELOAD", False),
+        reload=_env_flag("PY_BACKEND_RELOAD", True),
         log_level="info",
     )

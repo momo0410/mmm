@@ -36,7 +36,7 @@
   flex-shrink: 0;
   z-index: 100;
   transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .system-info-sidebar-wrapper:has(.system-info-header.collapsed) {
@@ -47,7 +47,7 @@
 /* Header / Floating Sidebar */
 .system-info-header {
   position: relative;
-  height: calc(100% - 40px);
+  height: 100%;
   width: 240px;
   background: var(--bg-secondary);
   backdrop-filter: blur(12px);
@@ -92,23 +92,27 @@
 /* Toggle Button */
 .header-toggle-btn {
   position: absolute;
-  left: 240px;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
   width: 24px;
   height: 64px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-left: none;
+  border-right: none;
   border-radius: 0 8px 8px 0;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   box-shadow: 4px 0 8px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1), all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 101;
   flex-shrink: 0;
+}
+
+.system-info-container:has(.system-info-header:not(.collapsed)) .header-toggle-btn {
+  left: 240px;
 }
 
 [data-theme="light"] .header-toggle-btn {
@@ -121,11 +125,6 @@
   background: rgba(30, 41, 59, 0.94);
   border-color: rgba(148, 163, 184, 0.28);
   box-shadow: 4px 0 12px rgba(2, 6, 23, 0.35);
-}
-
-.system-info-container:has(.system-info-header.collapsed) .header-toggle-btn {
-  left: 0;
-  transform: translateY(-50%);
 }
 
 .header-toggle-btn:hover {

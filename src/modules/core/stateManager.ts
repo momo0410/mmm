@@ -35,9 +35,9 @@ export class StateManager extends EventEmitter<AppState> {
       // 从后端加载状态
       await this.loadStateFromBackend();
       
-      console.log('✅ 状态管理器初始化完成');
+      console.log('状态管理器初始化完成');
     } catch (error) {
-      console.error('❌ 状态管理器初始化失败:', error);
+      console.error('状态管理器初始化失败:', error);
     }
   }
   /**
@@ -226,17 +226,17 @@ export class StateManager extends EventEmitter<AppState> {
     const themeConfigs = {
       light: {
         name: '浅色',
-        icon: '☀️',
+        icon: '',
         description: '清新明亮的浅色主题'
       },
       dark: {
         name: '深色',
-        icon: '🌙',
+        icon: '',
         description: '护眼舒适的深色主题'
       },
       sakura: {
         name: '樱花粉',
-        icon: '🌸',
+        icon: '',
         description: '温柔浪漫的樱花主题'
       }
     };
@@ -251,9 +251,9 @@ export class StateManager extends EventEmitter<AppState> {
     const nextIndex = (currentIndex + 1) % themes.length;
     const nextTheme = themes[nextIndex];
     const themeConfigs = {
-      light: { name: '浅色', icon: '☀️' },
-      dark: { name: '深色', icon: '🌙' },
-      sakura: { name: '樱花粉', icon: '🌸' }
+      light: { name: '浅色', icon: '' },
+      dark: { name: '深色', icon: '' },
+      sakura: { name: '樱花粉', icon: '' }
     };
     return themeConfigs[nextTheme];
   }

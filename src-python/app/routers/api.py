@@ -1510,7 +1510,7 @@ async def get_log_file_info(log_path: str):
 # ==================== 渗透测试 Agent (多任务) ====================
 from app.services.pentest_agent.state import State
 from app.services.pentest_agent.executor import Executor
-from app.services.pentest_agent.llm_client import LLMClient, set_llm_client, get_llm_client
+from app.services.pentest_agent.llm_client import LLMClient, set_llm_client
 from datetime import datetime
 from uuid import uuid4
 
@@ -1631,11 +1631,6 @@ class PentestStartRequest(BaseModel):
 
 @router.post("/agent/pentest/start")
 async def pentest_start(req: PentestStartRequest):
-    # 检查是否有运行中的任务
-    for tid, tinfo in _pentest_tasks.items():
-        if tinfo.get("status") == "running":
-            return {"success": False, "message": f"已有任务在运行中: {tid}", "task_id": tid}
-
     task_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
     state_path = _state_file(task_id)
 
@@ -1660,16 +1655,15 @@ async def pentest_start(req: PentestStartRequest):
         "task_obj": None,
     }
 
+    loop = asyncio.new_event_loop()
+
+    def llm_fn(system: str, user: str, on_chunk=None) -> str:
+        if on_chunk is not None:
+            return loop.run_until_complete(client.chat_stream(system, user, on_chunk=on_chunk))
+        return loop.run_until_complete(client.chat(system, user))
+
     async def _run_agent():
         try:
-            llm = get_llm_client()
-            loop = asyncio.new_event_loop()
-
-            def llm_fn(system: str, user: str, on_chunk=None) -> str:
-                if on_chunk is not None:
-                    return loop.run_until_complete(llm.chat_stream(system, user, on_chunk=on_chunk))
-                return loop.run_until_complete(llm.chat(system, user))
-
             from app.services.pentest_agent.agent import run as agent_run
 
             def _blocking():

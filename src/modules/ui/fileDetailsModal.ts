@@ -184,7 +184,7 @@ export class FileDetailsModal {
               padding: var(--spacing-sm) var(--spacing-md);
               font-size: 12px;
             ">
-              🔄 刷新
+              刷新
             </button>
             <button id="file-details-close-footer-btn" class="modern-btn secondary" style="
               padding: var(--spacing-sm) var(--spacing-md);

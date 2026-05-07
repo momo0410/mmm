@@ -132,14 +132,13 @@ export class LogAnalysisRenderer {
           </div>
 
           <div class="search-box">
-            ${Search({ theme: 'outline', size: '16', fill: 'currentColor' })}
             <input 
               type="text" 
               class="transparent-input" 
               id="log-filter-input"
               placeholder="搜索关键词..."
               value="${this.currentFilter}"
-              onchange="window.updateLogFilter(this.value)"
+              onkeydown="if(event.key==='Enter')window.executeLogSearch()"
             />
             ${this.currentFilter ? `
               <button class="clear-btn" onclick="window.clearLogFilter()">
@@ -147,6 +146,9 @@ export class LogAnalysisRenderer {
               </button>
             ` : ''}
           </div>
+          <button class="search-btn" onclick="window.executeLogSearch()" title="搜索">
+            ${Search({ theme: 'outline', size: '16', fill: 'currentColor' })}
+          </button>
 
           <button class="page-refresh-btn" onclick="window.refreshLogAnalysis()" title="刷新日志">
             ${Refresh({ theme: 'outline', size: '16', fill: 'currentColor' })}

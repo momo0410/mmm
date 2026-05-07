@@ -85,7 +85,6 @@ export function renderSystemInfoPage(context: SystemInfoPageContext): string {
             </button>
           </div>
         </div>
-
       </div>
 
       <div class="header-toggle-btn" onclick="window.toggleSystemInfoHeader()" title="切换菜单">

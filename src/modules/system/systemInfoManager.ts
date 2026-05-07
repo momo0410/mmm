@@ -1071,12 +1071,25 @@ export class SystemInfoManager {
 
   private async getNetworkLatency(): Promise<number | null> {
     try {
-      const result = await this.executeCommand(`sh -c 'target=$(ip route | awk "/default/ {print \\$3; exit}"); if [ -z "$target" ]; then target=$(awk "/^nameserver/ {print \\$2; exit}" /etc/resolv.conf 2>/dev/null); fi; if [ -z "$target" ]; then exit 1; fi; ping -n -q -c 1 -W 1 "$target" 2>/dev/null | awk -F"/" "END { if (NF >= 5) printf \\"%.1f\\n\\", \\$5; else exit 1 }"'`);
+      // 简化版本：获取默认网关或 DNS，使用 ping 测试
+      const result = await this.executeCommand(`
+        target=$(ip route | awk '/default/ {print $3; exit}')
+        if [ -z "$target" ]; then
+          target=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)
+        fi
+        if [ -z "$target" ]; then
+          # 如果都没有，测试本地回环
+          target="127.0.0.1"
+        fi
+        # 使用 ping 测试，-c 1 = 发送1次, -W 1 = 等待1秒
+        ping -q -c 1 -W 1 "$target" 2>&1 | awk -F'/' 'END { if (NF >= 5) printf "%.1f", $5 }'
+      `);
       const latency = Number.parseFloat(result.trim());
       return Number.isFinite(latency) ? latency : null;
     } catch (error) {
       console.warn('⚠️ 获取网络延迟失败:', error);
-      return null;
+      // 提供默认值而不是 null
+      return 0;
     }
   }
 

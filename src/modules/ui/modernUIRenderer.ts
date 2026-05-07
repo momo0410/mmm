@@ -330,7 +330,7 @@ export class ModernUIRenderer {
         <div class="title-bar-left">
           <div class="app-logo">
             <div class="logo-icon" style="width: 30px; height: 30px; border-radius: var(--border-radius-lg); display: flex; align-items: center; justify-content: center; overflow: hidden;">
-              <img src="/logo-32.png" alt="SDIT Logo" style="width: 100%; height: 100%; object-fit: contain;" />
+              <img src="/logo.png" alt="SDIT Logo" style="width: 100%; height: 100%; object-fit: contain;" />
             </div>
             <div class="app-info">
               <div class="app-name">安御智测</div>

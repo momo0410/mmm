@@ -218,15 +218,33 @@ export class DashboardRenderer {
                 <div class="dash-v3-net-chart-grid"></div>
                 <div class="dash-v3-net-charts">
                   <div class="dash-v3-net-chart-item">
-                    <div id="dashboard-download-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e')}</div>
+                    <div id="dashboard-download-chart" class="dash-v3-net-mini-chart" style="position:relative;">
+                      ${this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e', 'KB/s')}
+                      <div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;">
+                        <div class="tooltip-value"></div>
+                        <div class="tooltip-time"></div>
+                      </div>
+                    </div>
                     <span class="dash-v3-net-chart-label">下载</span>
                   </div>
                   <div class="dash-v3-net-chart-item">
-                    <div id="dashboard-upload-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6')}</div>
+                    <div id="dashboard-upload-chart" class="dash-v3-net-mini-chart" style="position:relative;">
+                      ${this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6', 'KB/s')}
+                      <div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;">
+                        <div class="tooltip-value"></div>
+                        <div class="tooltip-time"></div>
+                      </div>
+                    </div>
                     <span class="dash-v3-net-chart-label">上传</span>
                   </div>
                   <div class="dash-v3-net-chart-item">
-                    <div id="dashboard-latency-chart" class="dash-v3-net-mini-chart">${this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b')}</div>
+                    <div id="dashboard-latency-chart" class="dash-v3-net-mini-chart" style="position:relative;">
+                      ${this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b', 'ms')}
+                      <div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;">
+                        <div class="tooltip-value"></div>
+                        <div class="tooltip-time"></div>
+                      </div>
+                    </div>
                     <span class="dash-v3-net-chart-label">响应</span>
                   </div>
                 </div>
@@ -257,7 +275,7 @@ export class DashboardRenderer {
             </div>
             <div class="dash-v3-card-body dash-v3-chart-body">
               <div class="dash-v3-line-chart-grid" id="chart-memory">
-                ${this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4')}
+                ${this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4', 'chart-memory')}
               </div>
               <div id="dashboard-memory-usage-strip">${this.renderUsageBlocks(snapshot.memUsage, '#06b6d4')}</div>
             </div>
@@ -274,7 +292,7 @@ export class DashboardRenderer {
             </div>
             <div class="dash-v3-card-body dash-v3-chart-body">
               <div class="dash-v3-line-chart-grid" id="chart-disk-trend">
-                ${this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444')}
+                ${this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444', 'chart-disk-trend')}
               </div>
               <div id="dashboard-disk-usage-strip">${this.renderUsageBlocks(snapshot.diskUsage, '#ef4444')}</div>
             </div>
@@ -304,7 +322,7 @@ export class DashboardRenderer {
     return `<svg viewBox="0 0 ${chartWidth} ${height}" style="width:100%;height:${height}px;"><defs><linearGradient id="bar-grad-${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.9"/><stop offset="100%" stop-color="${color}" stop-opacity="0.3"/></linearGradient></defs>${bars.replace(new RegExp(color, 'g'), `url(#bar-grad-${color.replace('#','')})`)}</svg>`;
   }
 
-  private renderNetMiniChart(points: number[], color: string): string {
+  private renderNetMiniChart(points: number[], color: string, unit: string = ''): string {
     if (!points.length) return '';
     const width = 80;
     const height = 24;
@@ -313,16 +331,35 @@ export class DashboardRenderer {
     const max = Math.max(...displayPoints);
     const range = Math.max(1, max - min);
     const stepX = width / Math.max(1, displayPoints.length - 1);
-    const coords = displayPoints.map((p, i) => {
+    
+    const coordArray = displayPoints.map((p, i) => {
       const x = i * stepX;
       const y = height - ((p - min) / range) * (height - 4) - 2;
-      return `${x},${y}`;
+      return { x, y, value: p };
     });
+    
+    const coords = coordArray.map(c => `${c.x},${c.y}`);
     const linePath = `M${coords.join(' L')}`;
-    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;"><path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    
+    const dataPoints = coordArray.map((c, i) => {
+      const timeAgo = (displayPoints.length - 1 - i) * 5;
+      return `
+        <circle 
+          cx="${c.x}" cy="${c.y}" r="2" 
+          fill="${color}" stroke="white" stroke-width="0.5"
+          class="net-chart-point"
+          data-value="${c.value.toFixed(1)}"
+          data-unit="${unit}"
+          data-time="${timeAgo === 0 ? '现在' : `-${timeAgo}s`}"
+          style="cursor: pointer;"
+        />
+      `;
+    }).join('');
+    
+    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;overflow:visible;"><path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>${dataPoints}</svg>`;
   }
 
-  private renderLineChartWithGrid(points: number[], color: string): string {
+  private renderLineChartWithGrid(points: number[], color: string, chartId: string): string {
     if (!points.length) return '';
     const width = 600;
     const height = 120;
@@ -336,11 +373,13 @@ export class DashboardRenderer {
     const range = max - min;
     const stepX = chartW / Math.max(1, displayPoints.length - 1);
 
-    const coords = displayPoints.map((p, i) => {
+    const coordArray = displayPoints.map((p, i) => {
       const x = padding + i * stepX;
       const y = padding + chartH - ((p - min) / range) * chartH;
-      return `${x},${y}`;
+      return { x, y, value: p };
     });
+
+    const coords = coordArray.map(c => `${c.x},${c.y}`);
 
     const linePath = `M${coords.join(' L')}`;
     const areaPath = `M${coords[0].split(',')[0]},${padding + chartH} L${coords.join(' L')} L${coords[coords.length-1].split(',')[0]},${padding + chartH} Z`;
@@ -350,24 +389,63 @@ export class DashboardRenderer {
       return `<line x1="${padding}" y1="${y}" x2="${width-padding}" y2="${y}" stroke="rgba(148,163,184,0.18)" stroke-width="1"/>`;
     }).join('');
 
-    const verticalLines = Array.from({ length: 24 }, (_, index) => {
-      const x = padding + (chartW / 23) * index;
+    const pointCount = displayPoints.length;
+    const verticalLines = Array.from({ length: pointCount }, (_, index) => {
+      const x = padding + (chartW / Math.max(1, pointCount - 1)) * index;
       return `<line x1="${x}" y1="${padding}" x2="${x}" y2="${height - padding}" stroke="rgba(148,163,184,0.12)" stroke-width="1"/>`;
     }).join('');
 
+    const dataPoints = coordArray.map((c, i) => {
+      const timeAgo = (pointCount - 1 - i) * 5;
+      return `
+        <circle 
+          cx="${c.x}" cy="${c.y}" r="4" 
+          fill="${color}" stroke="white" stroke-width="2" 
+          class="chart-data-point"
+          data-value="${c.value.toFixed(1)}"
+          data-time="${timeAgo === 0 ? '现在' : `-${timeAgo}s`}"
+          style="cursor: pointer;"
+        />
+      `;
+    }).join('');
+
+    // X 轴时间标签：-15s, -30s, -45s, -60s（假设采样间隔5秒，共20个点=100秒）
+    const timeLabels = [-60, -45, -30, -15];
+    const xLabelElements = timeLabels.map(timeAgo => {
+      const index = Math.round((pointCount - 1) - (Math.abs(timeAgo) / 5));
+      if (index >= 0 && index < pointCount) {
+        const x = padding + index * stepX;
+        return `<text x="${x}" y="${height - 1}" font-size="9" fill="#8898b0" text-anchor="middle">${timeAgo}s</text>`;
+      }
+      return '';
+    }).join('');
+
     return `
-      <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:100%;">
-        <defs>
-          <linearGradient id="area-${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>
-            <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        ${verticalLines}
-        ${horizontalLines}
-        <path d="${areaPath}" fill="url(#area-${color.replace('#','')})"/>
-        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+      <div class="dash-v3-line-chart-wrap" id="${chartId}">
+        <div class="dash-v3-chart-y-labels">
+          ${[100, 75, 50, 25, 0].map(v => `<span style="color: #8898b0;">${v}%</span>`).join('')}
+        </div>
+        <div class="dash-v3-chart-main">
+          <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:100%;" class="line-chart-svg">
+            <defs>
+              <linearGradient id="area-${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            ${verticalLines}
+            ${horizontalLines}
+            <path d="${areaPath}" fill="url(#area-${color.replace('#','')})"/>
+            <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            ${dataPoints}
+            ${xLabelElements}
+          </svg>
+          <div class="chart-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.8); color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 100; white-space: nowrap;">
+            <div class="tooltip-value"></div>
+            <div class="tooltip-time"></div>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -412,14 +490,25 @@ export class DashboardRenderer {
     this.lastTrafficSample = { time: sampleTime, rxBytes, txBytes };
 
     const latencyRaw = systemInfo.networkInfo?.latencyMs;
-    const latencyMs = typeof latencyRaw === 'number' && Number.isFinite(latencyRaw) ? latencyRaw : null;
+    let latencyMs: number | null = typeof latencyRaw === 'number' && Number.isFinite(latencyRaw) ? latencyRaw : null;
+    
+    // 如果延迟数据异常，用历史数据或默认值代替
+    if (latencyMs === null || latencyMs < 0 || latencyMs > 10000) {
+      if (this.latencyHistory.length > 0) {
+        // 用最后一个有效数据
+        latencyMs = this.latencyHistory[this.latencyHistory.length - 1];
+      } else {
+        // 默认值
+        latencyMs = 0;
+      }
+    }
 
     this.pushHistory(this.cpuHistory, cpuUsage);
     this.pushHistory(this.memoryHistory, memUsage);
     this.pushHistory(this.diskHistory, diskUsage);
     this.pushHistory(this.downloadHistory, downloadRate);
     this.pushHistory(this.uploadHistory, uploadRate);
-    this.pushHistory(this.latencyHistory, latencyMs ?? 0);
+    this.pushHistory(this.latencyHistory, latencyMs);
 
     const snapshot: DashboardLiveSnapshot = {
       cpuUsage,
@@ -714,9 +803,9 @@ export class DashboardRenderer {
     this.setText('dashboard-upload-rate', this.formatRate(snapshot.uploadRate));
     this.setText('dashboard-download-rate', this.formatRate(snapshot.downloadRate));
     this.setText('dashboard-latency-value', this.formatLatency(snapshot.latencyMs));
-    this.setHtml('dashboard-download-chart', this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e'));
-    this.setHtml('dashboard-upload-chart', this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6'));
-    this.setHtml('dashboard-latency-chart', this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b'));
+    this.setHtml('dashboard-download-chart', `<div style="position:relative;">${this.renderNetMiniChart(this.downloadHistory.slice(-20), '#22c55e', 'KB/s')}<div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;"><div class="tooltip-value"></div><div class="tooltip-time"></div></div></div>`);
+    this.setHtml('dashboard-upload-chart', `<div style="position:relative;">${this.renderNetMiniChart(this.uploadHistory.slice(-20), '#3b82f6', 'KB/s')}<div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;"><div class="tooltip-value"></div><div class="tooltip-time"></div></div></div>`);
+    this.setHtml('dashboard-latency-chart', `<div style="position:relative;">${this.renderNetMiniChart(this.latencyHistory.slice(-20), '#f59e0b', 'ms')}<div class="chart-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.8);color:white;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:100;white-space:nowrap;"><div class="tooltip-value"></div><div class="tooltip-time"></div></div></div>`);
 
     this.setHtml('dashboard-memory-card-value', `${snapshot.memUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span>`);
     this.setHtml('dashboard-memory-used', `已用 ${systemInfo.memoryUsage.used}`);
@@ -725,7 +814,7 @@ export class DashboardRenderer {
 
     const memEl = document.querySelector('#chart-memory');
     if (memEl) {
-      memEl.innerHTML = this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4');
+      memEl.innerHTML = this.renderLineChartWithGrid(this.memoryHistory.slice(-20), '#06b6d4', 'chart-memory');
     }
 
     this.setHtml('dashboard-disk-trend-card-value', `${snapshot.diskUsage.toFixed(0)}<span class="dash-v3-card-unit">%</span>`);
@@ -735,11 +824,102 @@ export class DashboardRenderer {
 
     const diskEl = document.querySelector('#chart-disk-trend');
     if (diskEl) {
-      diskEl.innerHTML = this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444');
+      diskEl.innerHTML = this.renderLineChartWithGrid(this.diskHistory.slice(-20), '#ef4444', 'chart-disk-trend');
     }
   }
 
   initCharts(_force: boolean = false): void {
+    this.initChartTooltips();
+  }
+
+  private initChartTooltips(): void {
+    setTimeout(() => {
+      document.querySelectorAll('.chart-data-point').forEach(point => {
+        const el = point as HTMLElement;
+        el.style.transition = 'r 0.2s ease';
+        
+        el.addEventListener('mouseenter', (e) => {
+          el.setAttribute('r', '6');
+          const value = el.dataset.value;
+          const time = el.dataset.time;
+          this.showTooltip(e, value, time);
+        });
+        
+        el.addEventListener('mouseleave', () => {
+          el.setAttribute('r', '4');
+          this.hideTooltip();
+        });
+        
+        el.addEventListener('mousemove', (e) => {
+          this.updateTooltipPosition(e);
+        });
+      });
+      
+      document.querySelectorAll('.net-chart-point').forEach(point => {
+        const el = point as HTMLElement;
+        el.style.transition = 'r 0.2s ease';
+        
+        el.addEventListener('mouseenter', (e) => {
+          el.setAttribute('r', '4');
+          const value = el.dataset.value;
+          const unit = el.dataset.unit || '';
+          const time = el.dataset.time;
+          this.showTooltip(e, value, time, unit);
+        });
+        
+        el.addEventListener('mouseleave', () => {
+          el.setAttribute('r', '2');
+          this.hideTooltip();
+        });
+        
+        el.addEventListener('mousemove', (e) => {
+          this.updateTooltipPosition(e);
+        });
+      });
+    }, 100);
+  }
+
+  private showTooltip(e: MouseEvent, value: string | undefined, time: string | undefined, unit: string = '%'): void {
+    const chartMain = (e.target as HTMLElement).closest('.dash-v3-chart-main');
+    const netChartItem = (e.target as HTMLElement).closest('.dash-v3-net-chart-item');
+    const tooltip = (chartMain?.querySelector('.chart-tooltip') || netChartItem?.querySelector('.chart-tooltip')) as HTMLElement;
+    if (!tooltip) return;
+    
+    const valueEl = tooltip.querySelector('.tooltip-value');
+    const timeEl = tooltip.querySelector('.tooltip-time');
+    if (valueEl) valueEl.textContent = `值: ${value}${unit}`;
+    if (timeEl) timeEl.textContent = `时间: ${time}`;
+    
+    tooltip.style.display = 'block';
+    this.updateTooltipPosition(e);
+  }
+
+  private updateTooltipPosition(e: MouseEvent): void {
+    const targetEl = e.target as HTMLElement;
+    const chartMain = targetEl.closest('.dash-v3-chart-main');
+    const netChartContainer = targetEl.closest('#dashboard-download-chart, #dashboard-upload-chart, #dashboard-latency-chart');
+    
+    let tooltip: HTMLElement | null = null;
+    let containerRect: DOMRect | null = null;
+    
+    if (chartMain) {
+      tooltip = chartMain.querySelector('.chart-tooltip') as HTMLElement;
+      containerRect = chartMain.getBoundingClientRect();
+    } else if (netChartContainer) {
+      tooltip = netChartContainer.querySelector('.chart-tooltip') as HTMLElement;
+      containerRect = netChartContainer.getBoundingClientRect();
+    }
+    
+    if (!tooltip || !containerRect) return;
+    
+    tooltip.style.left = `${e.clientX - containerRect.left + 10}px`;
+    tooltip.style.top = `${e.clientY - containerRect.top - 40}px`;
+  }
+
+  private hideTooltip(): void {
+    document.querySelectorAll('.chart-tooltip').forEach(tooltip => {
+      (tooltip as HTMLElement).style.display = 'none';
+    });
   }
 
 }

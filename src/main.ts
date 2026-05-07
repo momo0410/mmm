@@ -25,6 +25,9 @@ import { aiService } from './modules/ai/aiService';
 import { sftpManager } from './modules/remote/sftpManager';
 import { UploadModal } from './modules/ui/uploadModal';
 import { CreateFolderModal } from './modules/ui/createFolderModal';
+import { CompressModal } from './modules/ui/compressModal';
+import { ExtractModal } from './modules/ui/extractModal';
+import { FileDetailsModal } from './modules/ui/fileDetailsModal';
 
 // 创建设置管理器实例
 const settingsManager = new SettingsManager();
@@ -282,11 +285,17 @@ async function initializeApp() {
 
     // 提供全局函数供面板按钮直接调用（避免重复绑定与渲染时机问题）
 
-    // 实例化上传和新建文件夹模态框
+    // 实例化上传、新建文件夹、打包、解压和文件详情模态框
     const uploadModal = new UploadModal();
     const createFolderModal = new CreateFolderModal();
+    const compressModal = new CompressModal();
+    const extractModal = new ExtractModal();
+    const fileDetailsModal = new FileDetailsModal();
     (window as any).uploadModal = uploadModal;
     (window as any).createFolderModal = createFolderModal;
+    (window as any).compressModal = compressModal;
+    (window as any).extractModal = extractModal;
+    (window as any).fileDetailsModal = fileDetailsModal;
 
     (window as any).sftpRefresh = async () => {
       try {
@@ -3991,10 +4000,10 @@ document.addEventListener('click', (event) => {
 /**
  * 加载日志文件列表
  */
-async function loadLogFileList() {
+async function loadLogFileList(): Promise<any[] | null> {
   // 检查是否在日志页面
   const select = document.getElementById('log-file-select') as HTMLSelectElement;
-  if (!select) return;
+  if (!select) return null;
 
   console.log('📂 正在加载日志源列表...');
   try {
@@ -4081,8 +4090,10 @@ async function loadLogFileList() {
       select.innerHTML = optionsHtml;
       console.log(`✅ 已加载日志源: ${logFiles.length} 个文件`);
     }
+    return logFiles;
   } catch (error) {
     console.error('❌ 加载日志源列表失败:', error);
+    return null;
   }
 }
 
@@ -4093,8 +4104,8 @@ async function loadLogFileList() {
   console.log('🔄 刷新日志审计');
   cancelActiveLogAIAnalysis();
   
-  // 尝试加载文件列表（异步执行，不阻塞UI）
-  loadLogFileList();
+  // 加载文件列表并自动选择有效的日志路径
+  const logFiles = await loadLogFileList();
 
   try {
     const logContainer = document.getElementById('log-container');
@@ -4111,13 +4122,40 @@ async function loadLogFileList() {
     // 获取当前配置
     const state = (window as any).logAnalysisState || {};
     const useJournalctl = state.useJournalctl || false;
-    const logPath = state.logPath || '/var/log/tuned/tuned.log';
+    let logPath = state.logPath || '/var/log/tuned/tuned.log';
     const pageSize = parseInt(state.lines || '100');
     const page = state.page || 1;
     const filter = state.filter || '';
     const journalUnit = state.journalUnit || '';
     const dateFilter = state.date || '';
     const levelFilter = state.levelFilter || '';
+
+    // 第一次进入页面时自动检测有效日志路径
+    if (!state.logPath && logFiles && logFiles.length > 0) {
+      const priorityPatterns = ['auth.log', 'secure', 'syslog', 'messages'];
+      for (const pattern of priorityPatterns) {
+        const found = logFiles.find((f: any) => f.path.toLowerCase().includes(pattern));
+        if (found) {
+          logPath = found.path;
+          break;
+        }
+      }
+      if (logPath === '/var/log/tuned/tuned.log' && logFiles.length > 0) {
+        logPath = logFiles[0].path;
+      }
+      state.logPath = logPath;
+
+      // 同步更新 select 元素和渲染器状态
+      const select = document.getElementById('log-file-select') as HTMLSelectElement;
+      if (select) {
+        select.value = logPath;
+      }
+      const app = (window as any).app;
+      if (app?.modernUIRenderer?.logAnalysisRenderer) {
+        app.modernUIRenderer.logAnalysisRenderer.setLogPath(logPath);
+      }
+      console.log(`📂 自动选择日志路径: ${logPath}`);
+    }
 
     let result: any;
     
@@ -4527,6 +4565,16 @@ function escapeHtml(text: string): string {
   (window as any).logAnalysisState.filter = '';
   (window as any).logAnalysisState.page = 1;
   (window as any).refreshLogAnalysis();
+};
+
+/**
+ * 点击搜索按钮执行搜索
+ */
+(window as any).executeLogSearch = function () {
+  const input = document.getElementById('log-filter-input') as HTMLInputElement;
+  if (input) {
+    (window as any).updateLogFilter(input.value);
+  }
 };
 
 /**

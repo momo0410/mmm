@@ -44,7 +44,7 @@ export class SDITApp {
    */
   async initialize(): Promise<void> {
     try {
-      console.log('🚀 SDIT 应用初始化开始...');
+      console.log('SDIT 应用初始化开始...');
       
       // 初始化状态管理器
       await this.stateManager.initialize();
@@ -64,9 +64,9 @@ export class SDITApp {
       // 绑定事件
       this.bindEvents();
       
-      console.log('✅ SDIT 应用初始化完成');
+      console.log('SDIT 应用初始化完成');
     } catch (error) {
-      console.error('❌ 应用初始化失败:', error);
+      console.error('应用初始化失败:', error);
       throw error;
     }
   }
@@ -142,11 +142,11 @@ export class SDITApp {
     try {
       // 保存主题设置到后端
       await invoke('set_current_theme', { theme });
-      console.log(`✅ 主题已保存到设置: ${theme}`);
+      console.log(`主题已保存到设置：${theme}`);
       
       this.showMessage(`已切换到${themeNames[theme] || '未知'}模式`, 'success');
     } catch (error) {
-      console.error('❌ 保存主题设置失败:', error);
+      console.error('保存主题设置失败:', error);
       // 即使保存失败也继续切换UI
     }
     // 更新状态管理器

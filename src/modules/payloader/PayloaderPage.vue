@@ -114,17 +114,17 @@
           v-if="state.viewMode === 'list'"
           :class="['payloader-btn', 'payloader-btn--pentest', { 'is-running': agentRunning }]"
           @click="handlePentestEntry"
-          :title="agentRunning ? `继续查看任务：${pentestTarget || '当前目标'}` : '智能分析'"
+          :title="agentRunning ? `${activeRunningCount} 个任务运行中` : '风险探测'"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
             <path d="M2 17l10 5 10-5"></path>
             <path d="M2 12l10 5 10-5"></path>
           </svg>
-          {{ agentRunning ? '继续任务' : '智能分析' }}
+          {{ agentRunning ? `任务 (${activeRunningCount})` : '风险探测' }}
           <span v-if="agentRunning" class="payloader-btn-running-badge">
             <span class="payloader-btn-running-dot"></span>
-            运行中
+            {{ activeRunningCount }}
           </span>
         </button>
         <button
@@ -173,7 +173,7 @@
       <div v-if="showPentestModal" class="payloader-modal-overlay" @click.self="closePentestModal">
         <div class="payloader-modal">
           <div class="payloader-modal-header">
-            <h3>智能分析</h3>
+            <h3>风险探测</h3>
             <button class="payloader-modal-close" @click="closePentestModal">&times;</button>
           </div>
           <div class="payloader-modal-body">
@@ -217,10 +217,10 @@
             <button class="payloader-btn payloader-btn--secondary" @click="closePentestModal">取消</button>
             <button
               class="payloader-btn payloader-btn--primary"
-              :disabled="agentRunning || !normalizedPentestTarget"
+              :disabled="!normalizedPentestTarget"
               @click="startHostAgent"
             >
-              {{ agentRunning ? '运行中...' : '开始检测' }}
+              {{ '开始检测' }}
             </button>
           </div>
         </div>
@@ -230,9 +230,27 @@
       <div v-if="showResultModal" class="payloader-modal-overlay" @click.self="requestCloseResultModal">
         <div class="payloader-modal payloader-modal--result">
           <div class="payloader-modal-header">
-            <h3>渗透结果分析</h3>
+            <div class="payloader-task-tabs">
+              <button
+                v-for="task in pentestTasks"
+                :key="task.id"
+                :class="['payloader-task-tab', { active: selectedTaskId === task.id, running: task.running, completed: !task.running && !task.error, failed: task.error }]"
+                :title="`${task.target} (${task.running ? '运行中' : task.error ? '失败' : '已完成'})`"
+                @click="selectedTaskId = task.id"
+              >
+                <span class="payloader-task-tab-dot" :class="{ running: task.running, completed: !task.running && !task.error, failed: task.error }"></span>
+                <span class="payloader-task-tab-target">{{ task.target }}</span>
+                <button
+                  v-if="!task.running"
+                  class="payloader-task-tab-close"
+                  title="移除任务"
+                  @click.stop="removeTask(task.id)"
+                >&times;</button>
+              </button>
+              <button class="payloader-task-tab-add" title="新增探测任务" @click="closeResultModal(); openPentestModal()">+</button>
+            </div>
             <div class="payloader-modal-header-actions">
-              <button class="payloader-modal-header-btn" :disabled="!currentTaskId" @click="openLogModal()">
+              <button v-if="selectedTask" class="payloader-modal-header-btn" :disabled="!currentTaskId" @click="openLogModal()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                   <polyline points="14 2 14 8 20 8"></polyline>
@@ -246,12 +264,31 @@
             </div>
           </div>
           <div class="payloader-modal-body payloader-modal-body--scroll">
+            <!-- 选择任务 -->
+            <div v-if="!selectedTask" class="payloader-agent-task-list">
+              <p class="payloader-agent-task-list-hint" v-if="pentestTasks.length === 0">暂无任务，点击 <strong>+</strong> 启动新的风险探测</p>
+              <div v-for="task in pentestTasks" :key="task.id" class="payloader-agent-task-card" @click="selectedTaskId = task.id">
+                <div class="payloader-agent-task-card-header">
+                  <span class="payloader-agent-task-card-status" :class="{ running: task.running, completed: !task.running && !task.error, failed: task.error }">
+                    {{ task.running ? '运行中' : task.error ? '失败' : '已完成' }}
+                  </span>
+                  <button v-if="!task.running" class="payloader-task-tab-close" @click.stop="removeTask(task.id)">&times;</button>
+                </div>
+                <div class="payloader-agent-task-card-target">{{ task.target }}</div>
+                <div class="payloader-agent-task-card-meta">
+                  <span>阶段: {{ getPhaseLabel(task.phase) }}</span>
+                  <span v-if="task.findingsCount > 0">资产: {{ task.findingsCount }}</span>
+                  <span v-if="task.vulnCount > 0">漏洞: {{ task.vulnCount }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- 运行中 -->
-            <div v-if="agentRunning" class="payloader-agent-running">
+            <div v-else-if="selectedTask?.running" class="payloader-agent-running">
               <div class="payloader-agent-running-header">
                 <div class="payloader-agent-running-spinner"></div>
                 <div class="payloader-agent-running-header-text">
-                  <p class="payloader-agent-running-text">正在对 {{ pentestTarget || '目标资产' }} 执行智能分析...</p>
+                  <p class="payloader-agent-running-text">正在对 {{ selectedTask.target || '目标资产' }} 执行风险探测...</p>
                   <p class="payloader-agent-running-sub">
                     <span class="payloader-agent-phase-badge">{{ getPhaseLabel(agentResult?.phase) }}</span>
                     <span v-if="agentRoundCount > 0" class="payloader-agent-round-info">第 {{ agentRoundCount }} 轮任务</span>
@@ -313,10 +350,10 @@
             </div>
 
             <!-- 错误 -->
-            <div v-else-if="agentError" class="payloader-agent-error">
+            <div v-else-if="selectedTask?.error" class="payloader-agent-error">
               <div class="payloader-agent-error-icon">!</div>
-              <h4 class="payloader-agent-error-title">渗透检测失败</h4>
-              <p class="payloader-agent-error-desc">{{ agentError }}</p>
+              <h4 class="payloader-agent-error-title">{{ selectedTask.target }} 检测失败</h4>
+              <p class="payloader-agent-error-desc">{{ selectedTask.error }}</p>
             </div>
 
             <!-- 结果 -->
@@ -560,9 +597,9 @@
               </div>
             </div>
           </div>
-          <div v-if="!agentRunning" class="payloader-modal-footer">
+          <div v-if="selectedTask && !selectedTask.running" class="payloader-modal-footer">
             <button class="payloader-btn payloader-btn--secondary" @click="requestCloseResultModal">关闭</button>
-            <button class="payloader-btn payloader-btn--primary" @click="closeResultModal(); startHostAgent()">重新检测</button>
+            <button class="payloader-btn payloader-btn--primary" @click="pentestTarget = selectedTask?.target || ''; closeResultModal(); openPentestModal()">重新检测</button>
           </div>
         </div>
       </div>
@@ -580,8 +617,8 @@
           </div>
           <div class="payloader-modal-footer">
             <button class="payloader-btn payloader-btn--secondary" @click="continueTaskInBackground">后台继续运行</button>
-            <button class="payloader-btn payloader-btn--danger" :disabled="stoppingTask" @click="interruptTaskAndClose">
-              {{ stoppingTask ? '中断中...' : '中断任务' }}
+            <button class="payloader-btn payloader-btn--danger" :disabled="!!stoppingTaskId" @click="interruptTaskAndClose">
+              {{ stoppingTaskId ? '中断中...' : '中断任务' }}
             </button>
           </div>
         </div>
@@ -1283,19 +1320,47 @@ const handleCopy = async (code: string) => {
 const showPentestModal = ref(false);
 const showResultModal = ref(false);
 const showCloseConfirmModal = ref(false);
-const agentRunning = ref(false);
-const agentError = ref('');
-const agentResult = ref<any>(null);
-const stoppingTask = ref(false);
+
+interface PentestTask {
+  id: string;
+  taskId: string;
+  target: string;
+  running: boolean;
+  phase: string;
+  findingsCount: number;
+  vulnCount: number;
+  actionsCount: number;
+  actions: any[];
+  targets: string[];
+  timer: ReturnType<typeof setInterval> | null;
+  result: any;
+  error: string;
+  executionMode: PentestExecutionMode;
+  startedAt: number;
+}
+const pentestTasks = ref<PentestTask[]>([]);
+const selectedTaskId = ref<string>('');
+const stoppingTaskId = ref<string>('');
+
+const agentRunning = computed(() => pentestTasks.value.some(t => t.running));
+const activeRunningCount = computed(() => pentestTasks.value.filter(t => t.running).length);
+
+const selectedTask = computed(() => pentestTasks.value.find(t => t.id === selectedTaskId.value) || null);
+const agentResult = computed(() => selectedTask.value?.result || null);
+const currentTaskId = computed(() => selectedTask.value?.taskId || '');
+
 const pentestTarget = ref<string>('');
 type PentestExecutionMode = 'serial' | 'parallel';
 const PENTEST_EXECUTION_MODE_STORAGE_KEY = 'LERT-pentest-execution-mode';
 const pentestExecutionMode = ref<PentestExecutionMode>(loadPentestExecutionMode());
 const pentestModalError = ref('');
 const normalizedPentestTarget = computed(() => String(pentestTarget.value || '').trim());
-const currentTaskId = ref<string>('');
 
-let statusTimer: ReturnType<typeof setInterval> | null = null;
+function generateTaskId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+let taskPollTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 function loadPentestExecutionMode(): PentestExecutionMode {
   try {
@@ -1339,8 +1404,11 @@ function openPentestModal() {
 
 function handlePentestEntry() {
   pentestModalError.value = '';
-  if (agentRunning.value && currentTaskId.value) {
+  if (agentRunning.value) {
     showResultModal.value = true;
+    if (!selectedTaskId.value && pentestTasks.value.length > 0) {
+      selectedTaskId.value = pentestTasks.value[pentestTasks.value.length - 1].id;
+    }
     return;
   }
   openPentestModal();
@@ -1362,10 +1430,11 @@ function closePentestModal() {
 function closeResultModal() {
   showCloseConfirmModal.value = false;
   showResultModal.value = false;
+  selectedTaskId.value = '';
 }
 
 function requestCloseResultModal() {
-  if (agentRunning.value && currentTaskId.value) {
+  if (selectedTask.value?.running) {
     showCloseConfirmModal.value = true;
     return;
   }
@@ -1380,59 +1449,69 @@ function continueTaskInBackground() {
   closeResultModal();
 }
 
+function stopTaskTimer(taskId: string) {
+  const timer = taskPollTimers.get(taskId);
+  if (timer) {
+    clearInterval(timer);
+    taskPollTimers.delete(taskId);
+  }
+}
+
+function removeTask(taskId: string) {
+  const task = pentestTasks.value.find(t => t.id === taskId);
+  if (!task) return;
+  stopTaskTimer(taskId);
+  pentestTasks.value = pentestTasks.value.filter(t => t.id !== taskId);
+  if (selectedTaskId.value === taskId) {
+    selectedTaskId.value = pentestTasks.value.length > 0 ? pentestTasks.value[pentestTasks.value.length - 1].id : '';
+  }
+}
+
 async function interruptTaskAndClose() {
-  if (!currentTaskId.value || stoppingTask.value) {
+  const task = selectedTask.value;
+  if (!task || !task.running || stoppingTaskId.value) {
     closeResultModal();
     return;
   }
 
-  stoppingTask.value = true;
+  stoppingTaskId.value = task.id;
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
-    await pythonApi.pentestStop(currentTaskId.value);
-    if (statusTimer) {
-      clearInterval(statusTimer);
-      statusTimer = null;
-    }
-    agentRunning.value = false;
-    showCloseConfirmModal.value = false;
-    agentError.value = '';
+    await pythonApi.pentestStop(task.taskId);
+    stopTaskTimer(task.id);
+    updateTaskInList(task.id, { running: false });
 
-    const currentPhase = agentResult.value?.phase || 'init';
-    agentResult.value = {
+    showCloseConfirmModal.value = false;
+
+    updateTaskResult(task.id, {
       status: 'failed',
       final: {
         report: '# 正在生成阶段性总结报告...\n\n任务已中断，正在根据当前阶段已获取的信息整理总结，请稍候。',
-        phase: currentPhase,
+        phase: task.phase,
       },
-      phase: currentPhase,
-      targets: agentResult.value?.targets || [normalizedPentestTarget.value].filter(Boolean),
-      findings_count: agentResult.value?.findings_count || 0,
-      vuln_count: agentResult.value?.vuln_count || 0,
-      actions_count: agentResult.value?.actions_count || 0,
-      actions: agentResult.value?.actions || [],
-    };
+      phase: task.phase,
+    });
 
     (window as any).showNotification?.('任务已中断，正在生成总结报告', 'success');
 
-    const summary = await buildInterruptedPentestSummary(currentTaskId.value);
-    agentResult.value = {
+    const summary = await buildInterruptedPentestSummary(task.taskId, task.target);
+    updateTaskResult(task.id, {
       status: 'failed',
       final: {
         report: summary.report,
         phase: summary.phase,
       },
       phase: summary.phase,
-      targets: agentResult.value?.targets || [normalizedPentestTarget.value].filter(Boolean),
+      targets: task.targets,
       findings_count: summary.findingsCount,
       vuln_count: summary.vulnCount,
       actions_count: summary.actionsCount,
       actions: summary.actions,
-    };
+    });
   } catch (err: any) {
     (window as any).showNotification?.(err?.message || '中断任务失败', 'error');
   } finally {
-    stoppingTask.value = false;
+    stoppingTaskId.value = '';
   }
 }
 
@@ -1447,6 +1526,20 @@ function getPhaseLabel(phase: string | undefined) {
     case 'done':    return '已完成';
     default:        return phase || '运行中';
   }
+}
+
+function updateTaskInList(taskId: string, updates: Partial<PentestTask>) {
+  const tasks = pentestTasks.value;
+  for (let i = 0; i < tasks.length; i++) {
+    if (tasks[i].id === taskId) {
+      tasks[i] = { ...tasks[i], ...updates };
+      break;
+    }
+  }
+}
+
+function updateTaskResult(taskId: string, result: any) {
+  updateTaskInList(taskId, { result });
 }
 
 function countTaskRounds(actions: Array<Record<string, any>> | undefined | null) {
@@ -2081,7 +2174,7 @@ async function resolvePentestFinalReport(params: {
   };
 }
 
-async function buildInterruptedPentestSummary(taskId: string) {
+async function buildInterruptedPentestSummary(taskId: string, target: string = '') {
   const pythonApi = (await import('../../config/python-api.config')).default;
 
   const [statusResult, logResult] = await Promise.allSettled([
@@ -2098,10 +2191,11 @@ async function buildInterruptedPentestSummary(taskId: string) {
   const vulnCount = status?.vuln_count ?? agentResult.value?.vuln_count ?? 0;
   const actionsCount = status?.actions_count ?? agentResult.value?.actions_count ?? normalizedLogs.length ?? 0;
   const actions = Array.isArray(status?.actions) ? status!.actions : (agentResult.value?.actions || []);
+  const resolvedTarget = target || selectedTask.value?.target || '';
 
   const fallbackReport = buildUserFacingPentestReport({
     phase,
-    target: normalizedPentestTarget.value,
+    target: resolvedTarget,
     findingsCount,
     vulnCount,
     actionsCount,
@@ -2109,7 +2203,7 @@ async function buildInterruptedPentestSummary(taskId: string) {
     logs: normalizedLogs,
   }) || buildFallbackPentestReport({
     phase,
-    target: normalizedPentestTarget.value,
+    target: resolvedTarget,
     findingsCount,
     vulnCount,
     actionsCount,
@@ -2193,7 +2287,6 @@ ${recentLogs || '暂无执行日志'}
 async function startHostAgent() {
   const aiConfig = getAIConfig();
   if (!aiConfig || !aiConfig.apiKey) {
-    agentError.value = '请先在 AI 设置中配置 LLM API Key';
     showResultModal.value = true;
     return;
   }
@@ -2205,12 +2298,29 @@ async function startHostAgent() {
   }
 
   pentestModalError.value = '';
-
   showPentestModal.value = false;
   showResultModal.value = true;
-  agentRunning.value = true;
-  agentError.value = '';
-  agentResult.value = null;
+
+  const taskId = generateTaskId();
+  const newTask: PentestTask = {
+    id: taskId,
+    taskId: '',
+    target: normalizedTarget,
+    running: true,
+    phase: 'init',
+    findingsCount: 0,
+    vulnCount: 0,
+    actionsCount: 0,
+    actions: [],
+    targets: [],
+    timer: null,
+    result: null,
+    error: '',
+    executionMode: pentestExecutionMode.value,
+    startedAt: Date.now(),
+  };
+  pentestTasks.value = [...pentestTasks.value, newTask];
+  selectedTaskId.value = taskId;
 
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
@@ -2227,16 +2337,15 @@ async function startHostAgent() {
     });
 
     if (!startRes.success) {
-      agentRunning.value = false;
-      agentError.value = startRes.message;
+      updateTaskInList(taskId, { running: false, error: startRes.message });
       return;
     }
 
-    currentTaskId.value = startRes.task_id;
-    statusTimer = setInterval(pollStatus, 2000);
+    updateTaskInList(taskId, { taskId: startRes.task_id, running: true });
+    const timer = setInterval(() => pollStatusForTask(taskId), 2000);
+    taskPollTimers.set(taskId, timer);
   } catch (err: any) {
-    agentRunning.value = false;
-    agentError.value = err?.message || '启动渗透任务失败';
+    updateTaskInList(taskId, { running: false, error: err?.message || '启动渗透任务失败' });
   }
 }
 
@@ -2244,54 +2353,78 @@ async function restoreRunningPentestTask() {
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
     const historyRes = await pythonApi.pentestHistory();
-    const runningTask = (historyRes.history || []).find((item: any) => item?.status === 'running');
+    const runningTasks = (historyRes.history || []).filter((item: any) => item?.status === 'running');
 
-    if (!runningTask?.task_id) {
-      return;
+    for (const running of runningTasks) {
+      if (!running?.task_id) continue;
+
+      const status = await pythonApi.pentestStatus(running.task_id);
+      if (!status?.running) continue;
+
+      const existingTask = pentestTasks.value.find(t => t.taskId === running.task_id);
+      if (existingTask) continue;
+
+      const taskId = generateTaskId();
+      const newTask: PentestTask = {
+        id: taskId,
+        taskId: running.task_id,
+        target: running.target || status.targets?.[0] || '',
+        running: true,
+        phase: status.phase,
+        findingsCount: status.findings_count || 0,
+        vulnCount: status.vuln_count || 0,
+        actionsCount: status.actions_count || 0,
+        actions: status.actions || [],
+        targets: status.targets || [],
+        timer: null,
+        result: {
+          status: 'running',
+          phase: status.phase,
+          targets: status.targets,
+          findings_count: status.findings_count,
+          vuln_count: status.vuln_count,
+          actions_count: status.actions_count,
+          actions: status.actions,
+        },
+        error: '',
+        executionMode: 'parallel',
+        startedAt: Date.now(),
+      };
+      pentestTasks.value = [...pentestTasks.value, newTask];
+      if (!selectedTaskId.value) {
+        selectedTaskId.value = taskId;
+      }
+      const timer = setInterval(() => pollStatusForTask(taskId), 2000);
+      taskPollTimers.set(taskId, timer);
     }
-
-    const status = await pythonApi.pentestStatus(runningTask.task_id);
-    if (!status?.running) {
-      return;
-    }
-
-    currentTaskId.value = runningTask.task_id;
-    pentestTarget.value = runningTask.target || status.targets?.[0] || '';
-    agentRunning.value = true;
-    agentError.value = '';
-    agentResult.value = {
-      phase: status.phase,
-      targets: status.targets,
-      findings_count: status.findings_count,
-      vuln_count: status.vuln_count,
-      actions_count: status.actions_count,
-      actions: status.actions,
-    };
-
-    if (statusTimer) {
-      clearInterval(statusTimer);
-    }
-    statusTimer = setInterval(pollStatus, 2000);
   } catch (err) {
     console.error('恢复后台渗透任务失败:', err);
   }
 }
 
-async function pollStatus() {
-  if (!currentTaskId.value) return;
+async function pollStatusForTask(taskId: string) {
+  const task = pentestTasks.value.find(t => t.id === taskId);
+  if (!task || !task.taskId) return;
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
-    const status = await pythonApi.pentestStatus(currentTaskId.value);
+    const status = await pythonApi.pentestStatus(task.taskId);
 
     if (!status.running) {
-      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
-      agentRunning.value = false;
-      agentError.value = '';
+      stopTaskTimer(taskId);
+      updateTaskInList(taskId, {
+        running: false,
+        phase: status.phase,
+        findingsCount: status.findings_count || 0,
+        vulnCount: status.vuln_count || 0,
+        actionsCount: status.actions_count || 0,
+        actions: status.actions || [],
+        targets: status.targets || [],
+      });
 
       const report = await resolvePentestFinalReport({
-        taskId: currentTaskId.value,
+        taskId: task.taskId,
         phase: status.phase,
-        target: normalizedPentestTarget.value,
+        target: task.target,
         findingsCount: status.findings_count,
         vulnCount: status.vuln_count,
         actionsCount: status.actions_count,
@@ -2299,7 +2432,7 @@ async function pollStatus() {
         actions: status.actions,
       });
 
-      agentResult.value = {
+      updateTaskResult(taskId, {
         status: !status.error && status.phase === 'done' ? 'completed' : 'failed',
         final: { report: report.report, phase: report.phase },
         phase: status.phase,
@@ -2308,9 +2441,9 @@ async function pollStatus() {
         vuln_count: status.vuln_count,
         actions_count: status.actions_count,
         actions: status.actions,
-      };
+      });
     } else {
-      agentResult.value = {
+      updateTaskResult(taskId, {
         status: 'running',
         phase: status.phase,
         targets: status.targets,
@@ -2318,12 +2451,19 @@ async function pollStatus() {
         vuln_count: status.vuln_count,
         actions_count: status.actions_count,
         actions: status.actions,
-      };
+      });
+      updateTaskInList(taskId, {
+        phase: status.phase,
+        findingsCount: status.findings_count || 0,
+        vulnCount: status.vuln_count || 0,
+        actionsCount: status.actions_count || 0,
+        actions: status.actions || [],
+        targets: status.targets || [],
+      });
     }
   } catch (err: any) {
-    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
-    agentRunning.value = false;
-    agentError.value = err?.message || '查询状态失败';
+    stopTaskTimer(taskId);
+    updateTaskInList(taskId, { running: false, error: err?.message || '查询状态失败' });
   }
 }
 
@@ -2716,10 +2856,8 @@ document.addEventListener('click', (e) => {
 });
 
 onUnmounted(() => {
-  if (statusTimer) {
-    clearInterval(statusTimer);
-    statusTimer = null;
-  }
+  taskPollTimers.forEach((timer) => clearInterval(timer));
+  taskPollTimers.clear();
   stopLogPolling();
 });
 
@@ -3386,6 +3524,74 @@ onMounted(() => {
   color: var(--text-secondary);
   line-height: 1.7;
   margin: 0;
+}
+
+/* ── 基础按钮 ── */
+.payloader-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  color: var(--text-primary, #e4e4e7);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.payloader-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  border-color: var(--primary-color, #3b82f6);
+  color: var(--primary-color, #3b82f6);
+}
+
+.payloader-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.payloader-btn--primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.payloader-btn--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.28);
+  color: #fff;
+}
+
+.payloader-btn--secondary {
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary, #e4e4e7);
+}
+
+.payloader-btn--secondary:hover:not(:disabled) {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  border-color: var(--border-color, rgba(255, 255, 255, 0.2));
+  color: var(--text-primary, #e4e4e7);
+}
+
+.payloader-btn--danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.payloader-btn--danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  border-color: #b91c1c;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.28);
+  color: #fff;
 }
 
 .payloader-btn--sm {
@@ -4688,8 +4894,197 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px 16px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+}
+
+.payloader-task-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.payloader-task-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.payloader-task-tab:hover {
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #e4e4e7);
+}
+
+.payloader-task-tab.active {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--primary-color, #60a5fa);
+}
+
+.payloader-task-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-secondary, #a1a1aa);
+}
+
+.payloader-task-tab-dot.running {
+  background: #22c55e;
+  animation: payloader-pulse 1.5s ease-in-out infinite;
+}
+
+.payloader-task-tab-dot.completed {
+  background: #3b82f6;
+}
+
+.payloader-task-tab-dot.failed {
+  background: #ef4444;
+}
+
+@keyframes payloader-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.payloader-task-tab-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.payloader-task-tab-close {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: all 0.15s;
+}
+
+.payloader-task-tab-close:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.payloader-task-tab-add {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.payloader-task-tab-add:hover {
+  border-color: var(--primary-color, #60a5fa);
+  color: var(--primary-color, #60a5fa);
+}
+
+.payloader-agent-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.payloader-agent-task-list-hint {
+  text-align: center;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 14px;
+  padding: 32px 0;
+}
+
+.payloader-agent-task-card {
+  padding: 12px 16px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.payloader-agent-task-card:hover {
+  border-color: var(--primary-color, #60a5fa);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.payloader-agent-task-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.payloader-agent-task-card-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.payloader-agent-task-card-status.running {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+.payloader-agent-task-card-status.completed {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
+.payloader-agent-task-card-status.failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.payloader-agent-task-card-target {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #e4e4e7);
+  font-family: var(--font-mono, monospace);
+  margin-bottom: 4px;
+}
+
+.payloader-agent-task-card-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #a1a1aa);
 }
 
 .payloader-modal-header h3 {

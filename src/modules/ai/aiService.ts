@@ -12,7 +12,6 @@ export interface AIServiceConfig extends AIProviderConfig {
 }
 
 const STORAGE_KEY = 'LERT-ai-config'
-const LEGACY_STORAGE_KEYS = ['lovelyres-ai-config']
 
 const DEFAULT_PROVIDER_CONFIGS: Record<string, Omit<AIServiceConfig, 'provider'>> = {
   openai: {
@@ -110,16 +109,6 @@ function readJsonFromLocalStorage(key: string): any | null {
   }
 }
 
-function cleanupLegacyStorageKeys(): void {
-  LEGACY_STORAGE_KEYS.forEach((key) => {
-    try {
-      localStorage.removeItem(key)
-    } catch {
-      // ignore cleanup failures
-    }
-  })
-}
-
 function readConfigFromLegacySettings(): AIServiceConfig | null {
   const settings = readJsonFromLocalStorage('LERT-settings')
   const currentProvider = settings?.ai?.currentProvider
@@ -152,7 +141,6 @@ function readConfigFromCommandCenter(): AIServiceConfig | null {
 }
 
 function readStoredConfig(): AIServiceConfig | null {
-  cleanupLegacyStorageKeys()
   return (
     normalizeConfig(readJsonFromLocalStorage(STORAGE_KEY))
     || readConfigFromLegacySettings()
@@ -222,13 +210,11 @@ export class AIService {
       throw new Error('无效的 AI 配置')
     }
 
-    cleanupLegacyStorageKeys()
     this.config = normalized
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
   }
 
   clearConfig(): void {
-    cleanupLegacyStorageKeys()
     this.config = null
     localStorage.removeItem(STORAGE_KEY)
   }
