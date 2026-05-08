@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 from typing import Any, Dict, List, Optional
 from app.models.types import LogAnalysisEntry, LogAnalysisOutput, LogFileInfo
 from app.services.ssh_manager import SSHManager
@@ -123,37 +124,42 @@ def _build_date_grep_pattern(date_filter: str) -> str:
     except (ValueError, IndexError):
         pass
     return date_filter
-def _generate_log_read_command(
-    log_path: str, page: int = 1, page_size: int = 100,
-    filter_text: Optional[str] = None, date_filter: Optional[str] = None,
+
+
+def _shell_quote(value: str) -> str:
+    return shlex.quote(value)
+
+
+def _build_log_pipeline(
+    log_path: str,
+    filter_text: Optional[str] = None,
+    date_filter: Optional[str] = None,
 ) -> str:
-    cmd = f"cat '{log_path}' 2>/dev/null"
+    cmd = f"cat {_shell_quote(log_path)} 2>/dev/null"
     if date_filter:
-        grep_pattern = _build_date_grep_pattern(date_filter)
-        cmd = f"grep -E '{grep_pattern}' {cmd}"
+        grep_pattern = _shell_quote(_build_date_grep_pattern(date_filter))
+        cmd = f"{cmd} | grep -E {grep_pattern}"
     if filter_text:
-        cmd = f"grep -i '{filter_text}' {cmd}"
-    start = (page - 1) * page_size
-    cmd = f"{cmd} | tail -n +{start + 1} | head -n {page_size}"
+        cmd = f"{cmd} | grep -i {_shell_quote(filter_text)}"
     return cmd
-def _generate_journalctl_command(
-    page: int = 1, page_size: int = 100,
-    unit: Optional[str] = None, filter_text: Optional[str] = None,
-    since: Optional[str] = None, until: Optional[str] = None,
+
+
+def _build_journalctl_command(
+    unit: Optional[str] = None,
+    filter_text: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
 ) -> str:
     cmd_parts = ["journalctl --no-pager -o json"]
-    max_lines = page * page_size
-    cmd_parts.append(f"-n {max_lines}")
     if unit:
-        cmd_parts.append(f"-u {unit}")
+        cmd_parts.append(f"-u {_shell_quote(unit)}")
     if since:
-        cmd_parts.append(f"--since '{since}'")
+        cmd_parts.append(f"--since {_shell_quote(since)}")
     if until:
-        cmd_parts.append(f"--until '{until}'")
+        cmd_parts.append(f"--until {_shell_quote(until)}")
     if filter_text:
-        cmd_parts.append(f"--grep '{filter_text}'")
-    cmd = " ".join(cmd_parts)
-    return cmd
+        cmd_parts.append(f"--grep {_shell_quote(filter_text)}")
+    return " ".join(cmd_parts)
 def _generate_list_log_files_command() -> str:
     find_expr = (
         "/var/log -maxdepth 2 -type f -readable "
@@ -177,58 +183,21 @@ def _parse_level_filter(level_filter: Optional[str]) -> Optional[List[str]]:
         return None
     levels = [lvl.strip().lower() for lvl in level_filter.split(',') if lvl.strip()]
     return levels if levels else None
-async def read_system_log(
-    manager: SSHManager,
-    log_path: str,
-    page: int = 1,
-    page_size: int = 100,
-    filter_text: Optional[str] = None,
-    date_filter: Optional[str] = None,
-    level_filter: Optional[str] = None,
-) -> LogAnalysisOutput:
-    if not manager.is_connected():
-        raise ConnectionError("没有活动的 SSH 连接")
-    # 为了支持级别过滤后的正确分页，先读取足够多的原始数据
-    max_lines = page * page_size
-    cmd = _generate_log_read_command(log_path, 1, max_lines, filter_text, date_filter)
-    print(f"[log_analysis] 读取系统日志: {cmd}")
-    output = await manager.execute_command(cmd)
-    if output.exit_code and output.exit_code != 0:
-        print(f"[log_analysis] 退出码: {output.exit_code}")
-    entries = []
-    allowed_levels = _parse_level_filter(level_filter)
-    print(f"[log_analysis] level_filter={level_filter}, allowed_levels={allowed_levels}")
-    for line in output.output.split("\n"):
-        line = line.strip()
-        if not line or "Log file not found" in line or "No matching entries" in line:
-            continue
-        entry = _parse_log_line(line)
-        if allowed_levels and entry.level not in allowed_levels:
-            print(f"[log_analysis] 过滤掉 level={entry.level}, allowed={allowed_levels}, line={line[:60]}")
-            continue
-        entries.append(entry)
-    print(f"[log_analysis] 解析到 {len(entries)} 条日志")
-    # 分页返回
-    return _paginate_and_return(entries, page, page_size)
-async def read_journalctl_log(
-    manager: SSHManager,
-    page: int = 1,
-    page_size: int = 100,
-    unit: Optional[str] = None,
-    filter_text: Optional[str] = None,
-    since: Optional[str] = None,
-    until: Optional[str] = None,
-    level_filter: Optional[str] = None,
-) -> LogAnalysisOutput:
-    if not manager.is_connected():
-        raise ConnectionError("没有活动的 SSH 连接")
-    cmd = _generate_journalctl_command(page, page_size, unit, filter_text, since, until)
-    output = await manager.execute_command(cmd)
-    raw_output = output.output.strip()
-    entries = []
+
+
+def _parse_int_output(raw: str) -> int:
+    try:
+        return int((raw or "").strip() or "0")
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_journal_entries(raw_output: str, allowed_levels: Optional[List[str]] = None) -> List[LogAnalysisEntry]:
+    entries: List[LogAnalysisEntry] = []
+    raw_output = (raw_output or "").strip()
     if not raw_output or "no entries" in raw_output.lower():
-        return LogAnalysisOutput(total_count=0, highlighted_count=0, entries=[])
-    allowed_levels = _parse_level_filter(level_filter)
+        return entries
+
     try:
         data_array = json.loads(raw_output)
         if isinstance(data_array, list):
@@ -238,9 +207,10 @@ async def read_journalctl_log(
                     entries.append(parsed)
             if entries:
                 print(f"[log_analysis] 方法1: 解析为 JSON 数组，共 {len(entries)} 条")
-                return _paginate_and_return(entries, page, page_size)
+                return entries
     except (json.JSONDecodeError, ValueError):
         pass
+
     try:
         decoder = json.JSONDecoder()
         pos = 0
@@ -257,10 +227,10 @@ async def read_journalctl_log(
             pos = end
         if entries:
             print(f"[log_analysis] 方法2: JSONDecoder 逐对象解析，共 {len(entries)} 条")
-            return _paginate_and_return(entries, page, page_size)
+            return entries
     except (json.JSONDecodeError, ValueError) as e:
         print(f"[log_analysis] 方法2 失败: {e}")
-        pass
+
     if '\x1e' in raw_output:
         for line in raw_output.split('\x1e'):
             line = line.strip()
@@ -271,7 +241,8 @@ async def read_journalctl_log(
                 entries.append(parsed)
         if entries:
             print(f"[log_analysis] 方法3: json-seq 格式解析，共 {len(entries)} 条")
-            return _paginate_and_return(entries, page, page_size)
+            return entries
+
     blocks = re.split(r'\n\s*\n', raw_output)
     for block in blocks:
         block = block.strip()
@@ -286,10 +257,88 @@ async def read_journalctl_log(
             continue
     if entries:
         print(f"[log_analysis] 方法4: 空行分割解析，共 {len(entries)} 条")
-        return _paginate_and_return(entries, page, page_size)
+        return entries
+
     print(f"[log_analysis] 所有解析方法均失败")
     print(f"[log_analysis] 原始输出前 500 字符: {raw_output[:500]}")
-    return LogAnalysisOutput(total_count=0, highlighted_count=0, entries=[])
+    return entries
+async def read_system_log(
+    manager: SSHManager,
+    log_path: str,
+    page: int = 1,
+    page_size: int = 100,
+    filter_text: Optional[str] = None,
+    date_filter: Optional[str] = None,
+    level_filter: Optional[str] = None,
+) -> LogAnalysisOutput:
+    if not manager.is_connected():
+        raise ConnectionError("没有活动的 SSH 连接")
+    allowed_levels = _parse_level_filter(level_filter)
+    pipeline = _build_log_pipeline(log_path, filter_text, date_filter)
+    print(f"[log_analysis] 读取系统日志: {pipeline}")
+
+    if not allowed_levels:
+        start = max((page - 1) * page_size, 0)
+        page_cmd = f"{pipeline} | tail -n +{start + 1} | head -n {page_size}"
+        count_cmd = f"{pipeline} | wc -l"
+        page_output = await manager.execute_command(page_cmd)
+        count_output = await manager.execute_command(count_cmd)
+        if page_output.exit_code and page_output.exit_code != 0:
+            print(f"[log_analysis] page 退出码: {page_output.exit_code}")
+        total_count = _parse_int_output(count_output.output)
+        entries = []
+        for line in page_output.output.split("\n"):
+            line = line.strip()
+            if not line or "Log file not found" in line or "No matching entries" in line:
+                continue
+            entries.append(_parse_log_line(line))
+        highlighted_count = sum(1 for e in entries if e.highlighted)
+        return LogAnalysisOutput(total_count=total_count, highlighted_count=highlighted_count, entries=entries)
+
+    full_output = await manager.execute_command(pipeline)
+    if full_output.exit_code and full_output.exit_code != 0:
+        print(f"[log_analysis] 退出码: {full_output.exit_code}")
+    entries = []
+    print(f"[log_analysis] level_filter={level_filter}, allowed_levels={allowed_levels}")
+    for line in full_output.output.split("\n"):
+        line = line.strip()
+        if not line or "Log file not found" in line or "No matching entries" in line:
+            continue
+        entry = _parse_log_line(line)
+        if entry.level not in allowed_levels:
+            continue
+        entries.append(entry)
+    print(f"[log_analysis] 解析到 {len(entries)} 条日志")
+    return _paginate_and_return(entries, page, page_size)
+async def read_journalctl_log(
+    manager: SSHManager,
+    page: int = 1,
+    page_size: int = 100,
+    unit: Optional[str] = None,
+    filter_text: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    level_filter: Optional[str] = None,
+) -> LogAnalysisOutput:
+    if not manager.is_connected():
+        raise ConnectionError("没有活动的 SSH 连接")
+    allowed_levels = _parse_level_filter(level_filter)
+    cmd = _build_journalctl_command(unit, filter_text, since, until)
+
+    if not allowed_levels:
+        start = max((page - 1) * page_size, 0)
+        page_cmd = f"{cmd} | tail -n +{start + 1} | head -n {page_size}"
+        count_cmd = f"{cmd} | wc -l"
+        page_output = await manager.execute_command(page_cmd)
+        count_output = await manager.execute_command(count_cmd)
+        total_count = _parse_int_output(count_output.output)
+        entries = _parse_journal_entries(page_output.output, None)
+        highlighted_count = sum(1 for e in entries if e.highlighted)
+        return LogAnalysisOutput(total_count=total_count, highlighted_count=highlighted_count, entries=entries)
+
+    output = await manager.execute_command(cmd)
+    entries = _parse_journal_entries(output.output, allowed_levels)
+    return _paginate_and_return(entries, page, page_size)
 def _paginate_and_return(entries: list, page: int, page_size: int) -> LogAnalysisOutput:
     total_count = len(entries)
     start = (page - 1) * page_size

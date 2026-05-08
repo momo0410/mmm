@@ -47,8 +47,8 @@ export class StateManager extends EventEmitter<AppState> {
     try {
       // 加载主题
       const savedTheme = localStorage.getItem('LERT-theme');
-      if (savedTheme && ['light', 'dark', 'sakura'].includes(savedTheme)) {
-        this.state.theme = savedTheme as 'light' | 'dark' | 'sakura';
+      if (savedTheme && ['light', 'dark'].includes(savedTheme)) {
+        this.state.theme = savedTheme as 'light' | 'dark';
       }
       // 加载UI模式
       const savedStateStr = localStorage.getItem('LERT-state');
@@ -103,9 +103,9 @@ export class StateManager extends EventEmitter<AppState> {
   /**
    * 设置主题
    */
-  setTheme(theme: 'light' | 'dark' | 'sakura'): void {
+  setTheme(theme: 'light' | 'dark'): void {
     this.setState({ theme });
-    // 应用主题到DOM
+    // 应用主题到 DOM
     this.applyTheme(theme);
   }
   /**
@@ -117,8 +117,8 @@ export class StateManager extends EventEmitter<AppState> {
   /**
    * 切换主题
    */
-  toggleTheme(): 'light' | 'dark' | 'sakura' {
-    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
+  toggleTheme(): 'light' | 'dark' {
+    const themes: ('light' | 'dark')[] = ['light', 'dark'];
     const currentIndex = themes.indexOf(this.state.theme);
     const nextIndex = (currentIndex + 1) % themes.length;
     const newTheme = themes[nextIndex];
@@ -127,12 +127,12 @@ export class StateManager extends EventEmitter<AppState> {
     return newTheme;
   }
   /**
-   * 应用主题到DOM
+   * 应用主题到 DOM
    */
-  private applyTheme(theme: 'light' | 'dark' | 'sakura'): void {
+  private applyTheme(theme: 'light' | 'dark'): void {
     if (typeof document !== 'undefined') {
       document.documentElement.setAttribute('data-theme', theme);
-      document.body.classList.remove('light-theme', 'dark-theme', 'sakura-theme');
+      document.body.classList.remove('light-theme', 'dark-theme');
       document.body.classList.add(`${theme}-theme`);
     }
   }
@@ -233,11 +233,6 @@ export class StateManager extends EventEmitter<AppState> {
         name: '深色',
         icon: '',
         description: '护眼舒适的深色主题'
-      },
-      sakura: {
-        name: '樱花粉',
-        icon: '',
-        description: '温柔浪漫的樱花主题'
       }
     };
     return themeConfigs[this.state.theme];
@@ -246,14 +241,13 @@ export class StateManager extends EventEmitter<AppState> {
    * 获取下一个主题配置
    */
   getNextThemeConfig() {
-    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
+    const themes: ('light' | 'dark')[] = ['light', 'dark'];
     const currentIndex = themes.indexOf(this.state.theme);
     const nextIndex = (currentIndex + 1) % themes.length;
     const nextTheme = themes[nextIndex];
     const themeConfigs = {
       light: { name: '浅色', icon: '' },
-      dark: { name: '深色', icon: '' },
-      sakura: { name: '樱花粉', icon: '' }
+      dark: { name: '深色', icon: '' }
     };
     return themeConfigs[nextTheme];
   }
@@ -268,12 +262,6 @@ export class StateManager extends EventEmitter<AppState> {
    */
   isLightTheme(): boolean {
     return this.state.theme === 'light';
-  }
-  /**
-   * 检查是否为樱花主题
-   */
-  isSakuraTheme(): boolean {
-    return this.state.theme === 'sakura';
   }
   /**
    * 设置UI渲染器

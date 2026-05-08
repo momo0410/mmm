@@ -76,7 +76,7 @@ export interface PageState {
  * 统一应用状态类型定义（全局唯一来源）
  */
 export interface AppState {
-  theme: 'light' | 'dark' | 'sakura';
+  theme: 'light' | 'dark';
   uiMode: UIMode;
   isConnected: boolean;
   currentServer?: string;

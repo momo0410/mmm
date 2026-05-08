@@ -4120,8 +4120,8 @@ body,
   flex-direction: column;
   flex: 1 1 auto;
   width: 100%;
-  min-height: min-content;
-  height: auto;
+  min-height: 100%;
+  height: 100%;
   max-height: none;
   padding: 10px 8px 20px;
   gap: 10px;
@@ -4312,14 +4312,15 @@ body,
 
 .dash-v3-row-charts {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  flex-shrink: 0;
-  min-height: 260px;
+  flex: 1.15 1 320px;
+  min-height: 300px;
 }
 
 .dash-v3-row-lines {
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  flex-shrink: 0;
-  min-height: 240px;
+  flex: 0.85 1 240px;
+  align-content: stretch;
+  min-height: 220px;
 }
 
 /* 卡片 */
@@ -4336,13 +4337,14 @@ body,
 }
 
 .dash-v3-row-charts .dash-v3-card {
-  min-height: 260px;
+  min-height: 300px;
   height: auto;
 }
 
 .dash-v3-card-wide {
   min-width: 0;
-  min-height: 240px;
+  min-height: 220px;
+  height: 100%;
 }
 
 .dash-v3-card-header {
@@ -4388,7 +4390,7 @@ body,
 
 .dash-v3-chart-body {
   padding: 4px 12px 6px;
-  min-height: 180px;
+  min-height: 150px;
   flex: 1 1 auto;
   overflow: hidden;
 }
@@ -6295,4 +6297,3 @@ body,
   border-color: var(--text-secondary);
   color: var(--text-primary);
 }
-

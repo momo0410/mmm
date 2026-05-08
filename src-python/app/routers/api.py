@@ -1522,7 +1522,6 @@ _SRC_PYTHON_DIR = os.path.dirname(
 )
 _PROJECT_ROOT_DIR = os.path.dirname(_SRC_PYTHON_DIR)
 _PENTEST_STATE_DIR = os.path.join(_PROJECT_ROOT_DIR, "data", "pentest")
-_LEGACY_PENTEST_STATE_DIRS = [_SRC_PYTHON_DIR]
 
 def _state_file(task_id: str) -> str:
     return os.path.join(_PENTEST_STATE_DIR, f"pentest_state_{task_id}.json")
@@ -1538,7 +1537,7 @@ def _extract_task_id_from_state_file(path: str) -> Optional[str]:
 def _list_pentest_state_files() -> list[str]:
     files: list[str] = []
     seen: set[str] = set()
-    search_dirs = [_PENTEST_STATE_DIR, *_LEGACY_PENTEST_STATE_DIRS]
+    search_dirs = [_PENTEST_STATE_DIR]
 
     for directory in search_dirs:
         if not os.path.isdir(directory):
@@ -1564,11 +1563,6 @@ def _resolve_task_state_path(task_id: str) -> Optional[str]:
     state_path = _state_file(task_id)
     if os.path.exists(state_path):
         return state_path
-
-    for directory in _LEGACY_PENTEST_STATE_DIRS:
-        legacy_path = os.path.join(directory, f"pentest_state_{task_id}.json")
-        if os.path.exists(legacy_path):
-            return legacy_path
     return None
 
 def _load_task_state(task_id: str) -> Optional[State]:
@@ -1799,9 +1793,6 @@ async def pentest_delete_history(task_id: str):
     if tinfo and tinfo.get("state_file"):
         candidate_paths.insert(0, tinfo["state_file"])
 
-    for directory in _LEGACY_PENTEST_STATE_DIRS:
-        candidate_paths.append(os.path.join(directory, f"pentest_state_{task_id}.json"))
-
     deleted = False
     for state_path in dict.fromkeys(candidate_paths):
         try:
@@ -1813,9 +1804,6 @@ async def pentest_delete_history(task_id: str):
     report_candidates = [
         os.path.join(_PENTEST_STATE_DIR, f"pentest_report_{task_id}.md"),
     ]
-    for directory in _LEGACY_PENTEST_STATE_DIRS:
-        report_candidates.append(os.path.join(directory, "report.md"))
-        report_candidates.append(os.path.join(directory, f"pentest_report_{task_id}.md"))
     for report_path in dict.fromkeys(report_candidates):
         try:
             os.remove(report_path)

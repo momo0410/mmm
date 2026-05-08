@@ -1473,10 +1473,11 @@ function setupGlobalModalFunctions(app: SDITApp) {
     }
 
     root.style.height = `${availableHeight}px`;
+    root.style.minHeight = `${availableHeight}px`;
     root.style.maxHeight = `${availableHeight}px`;
     dashboard.style.minHeight = `${availableHeight}px`;
-    dashboard.style.height = 'auto';
-    dashboard.style.maxHeight = 'none';
+    dashboard.style.height = `${availableHeight}px`;
+    dashboard.style.maxHeight = `${availableHeight}px`;
   };
 
   (window as any).adjustSystemInfoTableLayout = () => {

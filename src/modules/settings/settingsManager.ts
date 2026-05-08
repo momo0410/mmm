@@ -30,7 +30,7 @@ export interface AISettings {
 }
 
 export interface AppSettings {
-  theme: 'light' | 'dark' | 'sakura';
+  theme: 'light' | 'dark';
   language: 'zh-CN' | 'en-US';
   autoConnect: boolean;
   defaultSSHPort: number;
@@ -678,7 +678,7 @@ export class SettingsManager extends EventEmitter<AppSettings> {
     }
 
     // 验证主题
-    if (settings.theme && !['light', 'dark', 'sakura'].includes(settings.theme)) {
+    if (settings.theme && !['light', 'dark'].includes(settings.theme)) {
       return false;
     }
 

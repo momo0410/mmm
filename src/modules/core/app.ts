@@ -12,7 +12,7 @@ import { SystemInfoManager } from '../system/systemInfoManager';
 import { sshConnectionManager } from '../remote/sshConnectionManager';
 import { sshTerminalManager } from '../ssh/sshTerminalManager';
 import { mountWorkspaceRoot } from '../ui/workspace/mountWorkspaceRoot';
-// 统一从pageTypes导入所有类型，移除本地重复定义
+// 统一从 pageTypes 导入所有类型，移除本地重复定义
 // @ts-ignore - 类型被重新导出供其他模块使用
 import type { AppPage, UIMode, AppState, ServerInfo } from '../ui/pageTypes';
 export type { AppPage, UIMode, AppState, ServerInfo } from '../ui/pageTypes';
@@ -30,13 +30,13 @@ export class SDITApp {
     this.sshManager = new SSHManager();
     this.settingsManager = new SettingsManager();
     this.systemInfoManager = new SystemInfoManager();
-    // 暴露管理器和应用实例给全局对象，供UI使用
+    // 暴露管理器和应用实例给全局对象，供 UI 使用
     (window as any).app = {
       sshManager: this.sshManager,
       systemInfoManager: this.systemInfoManager,
       stateManager: this.stateManager,
       modernUIRenderer: this.modernUIRenderer,
-      render: () => this.render() // 暴露render方法
+      render: () => this.render() // 暴露 render 方法
     };
   }
   /**
@@ -48,18 +48,18 @@ export class SDITApp {
       
       // 初始化状态管理器
       await this.stateManager.initialize();
-      // 设置UI渲染器到状态管理器
+      // 设置 UI 渲染器到状态管理器
       this.stateManager.setUIRenderer(this.modernUIRenderer);
       // 初始化主题
       await this.initializeTheme();
       
       // 初始化设置
       await this.settingsManager.initialize();
-      // 初始化SSH终端管理器
+      // 初始化 SSH 终端管理器
       await sshTerminalManager.initialize();
-      // 检查是否存在已有的SSH连接（浏览器刷新后恢复页面状态）
+      // 检查是否存在已有的 SSH 连接（浏览器刷新后恢复页面状态）
       await this.checkAndRestoreConnection();
-      // 渲染UI
+      // 渲染 UI
       this.render();
       // 绑定事件
       this.bindEvents();
@@ -77,7 +77,7 @@ export class SDITApp {
     try {
       // 从后端加载主题设置
       const savedTheme = await this.loadThemeFromBackend();
-      if (savedTheme && (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'sakura')) {
+      if (savedTheme && (savedTheme === 'light' || savedTheme === 'dark')) {
         this.stateManager.setTheme(savedTheme);
       }
       
@@ -102,7 +102,7 @@ export class SDITApp {
     }
   }
   /**
-   * 检查并恢复已有的SSH连接状态（浏览器刷新后恢复页面状态）
+   * 检查并恢复已有的 SSH 连接状态（浏览器刷新后恢复页面状态）
    */
   private async checkAndRestoreConnection(): Promise<void> {
     try {
@@ -120,20 +120,19 @@ export class SDITApp {
         } catch (e) {
           console.warn('预加载系统摘要失败（将在页面激活时重试）:', e);
         }
-        console.log('🔄 已恢复SSH连接状态，跳转到仪表盘页面');
+        console.log('已恢复 SSH 连接状态，跳转到仪表盘页面');
       }
     } catch (error) {
-      console.error('检查SSH连接状态失败:', error);
+      console.error('检查 SSH 连接状态失败:', error);
     }
   }
   /**
    * 设置主题
    */
-  async setTheme(theme: 'light' | 'dark' | 'sakura'): Promise<void> {
+  async setTheme(theme: 'light' | 'dark'): Promise<void> {
     const themeNames = {
       'light': '浅色',
       'dark': '深色',
-      'sakura': '樱花粉',
     };
     // 如果已经在该主题，不进行操作
     if (this.stateManager.getState().theme === theme) {
@@ -147,14 +146,14 @@ export class SDITApp {
       this.showMessage(`已切换到${themeNames[theme] || '未知'}模式`, 'success');
     } catch (error) {
       console.error('保存主题设置失败:', error);
-      // 即使保存失败也继续切换UI
+      // 即使保存失败也继续切换 UI
     }
     // 更新状态管理器
     this.stateManager.setTheme(theme);
     // 应用主题
     this.themeManager.setTheme(theme);
     
-    // 更新UI
+    // 更新 UI
     this.modernUIRenderer.updateState(this.stateManager.getState());
     this.updateTitleBar();
   }
@@ -163,7 +162,7 @@ export class SDITApp {
    */
   async toggleTheme(): Promise<void> {
     const currentTheme = this.stateManager.getState().theme;
-    const themes: ('light' | 'dark' | 'sakura')[] = ['light', 'dark', 'sakura'];
+    const themes: ('light' | 'dark')[] = ['light', 'dark'];
     const nextIndex = (themes.indexOf(currentTheme) + 1) % themes.length;
     await this.setTheme(themes[nextIndex]);
   }
@@ -248,7 +247,7 @@ export class SDITApp {
   private bindEvents(): void {
     // 定义全局窗口函数
     this.defineGlobalFunctions();
-    // 注入全局模态框HTML
+    // 注入全局模态框 HTML
     this.injectGlobalModals();
     // 全局点击事件处理
     document.addEventListener('click', (e) => {
@@ -258,13 +257,13 @@ export class SDITApp {
       const themeBtn = target.closest('.segmented-btn');
       if (themeBtn && themeBtn.closest('.theme-switcher')) {
         const theme = themeBtn.getAttribute('data-theme-value');
-        if (theme && ['light', 'dark', 'sakura'].includes(theme)) {
-          this.setTheme(theme as 'light' | 'dark' | 'sakura');
+        if (theme && ['light', 'dark'].includes(theme)) {
+          this.setTheme(theme as 'light' | 'dark');
         }
       }
       // 导航点击事件
       const navItem = target.closest('.nav-item');
-      // 排除设置按钮（它也有nav-item类，但没有data-nav-id或id不同）
+      // 排除设置按钮（它也有 nav-item 类，但没有 data-nav-id 或 id 不同）
       if (navItem && navItem.getAttribute('data-nav-id')) {
         const navId = navItem.getAttribute('data-nav-id');
         if (navId) {
@@ -287,7 +286,7 @@ export class SDITApp {
     // 窗口控制事件
     this.bindWindowControls();
     
-    // SSH连接事件
+    // SSH 连接事件
     this.bindSSHEvents();
   }
   /**
@@ -341,7 +340,7 @@ export class SDITApp {
   }
 
   /**
-   * 注入全局模态框HTML到页面body
+   * 注入全局模态框 HTML 到页面 body
    */
   private injectGlobalModals(): void {
     const modalsHTML = this.modernUIRenderer.renderGlobalModals();
@@ -400,10 +399,10 @@ export class SDITApp {
     });
   }
   /**
-   * 绑定SSH事件
+   * 绑定 SSH 事件
    */
   private bindSSHEvents(): void {
-    // SSH连接按钮
+    // SSH 连接按钮
     document.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       if (target.classList.contains('ssh-connect-btn')) {
@@ -416,7 +415,7 @@ export class SDITApp {
     });
   }
   /**
-   * 处理SSH连接
+   * 处理 SSH 连接
    */
   private async handleSSHConnect(): Promise<void> {
     try {
@@ -424,7 +423,7 @@ export class SDITApp {
       // 获取连接列表，如果有连接则连接第一个
       const connections = this.sshManager.getConnections();
       if (connections.length === 0) {
-        this.showMessage('请先添加SSH连接配置', 'warning');
+        this.showMessage('请先添加 SSH 连接配置', 'warning');
         return;
       }
       // 连接到第一个配置的服务器
@@ -433,16 +432,16 @@ export class SDITApp {
       // 连接成功后自动跳转到仪表板
       this.stateManager.setCurrentPage('dashboard');
       this.render();
-      this.showMessage('SSH连接成功', 'success');
+      this.showMessage('SSH 连接成功', 'success');
     } catch (error) {
-      console.error('SSH连接失败:', error);
-      this.showMessage('SSH连接失败', 'error');
+      console.error('SSH 连接失败:', error);
+      this.showMessage('SSH 连接失败', 'error');
     } finally {
       this.stateManager.setLoading(false);
     }
   }
   /**
-   * 处理SSH断开
+   * 处理 SSH 断开
    */
   private async handleSSHDisconnect(): Promise<void> {
     try {
@@ -504,7 +503,7 @@ export class SDITApp {
     return this.stateManager;
   }
   /**
-   * 获取SSH管理器
+   * 获取 SSH 管理器
    */
   getSSHManager(): SSHManager {
     return this.sshManager;

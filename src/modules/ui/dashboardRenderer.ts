@@ -409,17 +409,6 @@ export class DashboardRenderer {
       `;
     }).join('');
 
-    // X 轴时间标签：-15s, -30s, -45s, -60s（假设采样间隔5秒，共20个点=100秒）
-    const timeLabels = [-60, -45, -30, -15];
-    const xLabelElements = timeLabels.map(timeAgo => {
-      const index = Math.round((pointCount - 1) - (Math.abs(timeAgo) / 5));
-      if (index >= 0 && index < pointCount) {
-        const x = padding + index * stepX;
-        return `<text x="${x}" y="${height - 1}" font-size="9" fill="#8898b0" text-anchor="middle">${timeAgo}s</text>`;
-      }
-      return '';
-    }).join('');
-
     return `
       <div class="dash-v3-line-chart-wrap" id="${chartId}">
         <div class="dash-v3-chart-y-labels">
@@ -438,7 +427,6 @@ export class DashboardRenderer {
             <path d="${areaPath}" fill="url(#area-${color.replace('#','')})"/>
             <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             ${dataPoints}
-            ${xLabelElements}
           </svg>
           <div class="chart-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.8); color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 100; white-space: nowrap;">
             <div class="tooltip-value"></div>

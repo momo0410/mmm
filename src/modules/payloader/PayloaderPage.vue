@@ -361,7 +361,7 @@
               <!-- 状态栏 -->
               <div class="payloader-agent-summary">
                 <div class="payloader-agent-summary-header">
-                  <h3>阶段化安全验证报告</h3>
+                  <h3>阶段化风险探测报告</h3>
                   <span :class="['payloader-agent-status', agentResult.status]">
                     {{ agentResult.status === 'completed' ? '已完成' : agentResult.status === 'failed' ? '失败' : '运行中' }}
                   </span>
@@ -508,7 +508,7 @@
                     <path d="M2 17l10 5 10-5"></path>
                     <path d="M2 12l10 5 10-5"></path>
                   </svg>
-                  渗透结果分析
+                  风险探测结果分析
                 </h4>
                 
                 <div v-if="agentResult.final.attack_type" class="payloader-agent-attack-type">
@@ -572,7 +572,7 @@
                     <line x1="16" y1="17" x2="8" y2="17"></line>
                     <polyline points="10 9 9 9 8 9"></polyline>
                   </svg>
-                  完整检测报告
+                  完整风险探测报告
                 </h4>
                 <div class="payloader-agent-report-content" v-html="renderReportMarkdown(agentResult.final.report)"></div>
               </div>
@@ -653,8 +653,8 @@
               <section v-if="logReport" class="payloader-log-report-section">
                 <div class="payloader-log-report-header">
                   <div>
-                    <div class="payloader-log-report-eyebrow">执行报告</div>
-                    <h4>本次任务总结</h4>
+                    <div class="payloader-log-report-eyebrow">风险探测报告</div>
+                    <h4>本次风险探测总结</h4>
                   </div>
                   <button
                     v-if="logData.length > 0"
@@ -670,8 +670,11 @@
               <div v-if="logData.length === 0" class="payloader-log-empty">
               {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
               </div>
-              <div v-else class="payloader-log-layout">
+              <div v-else :class="['payloader-log-layout', { 'payloader-log-layout--with-terminal': !!selectedLogAction }]">
                 <div class="payloader-log-rounds">
+                  <div v-if="!selectedLogAction" class="payloader-log-terminal-inline-hint">
+                    右侧实时终端过程默认收起。点击某条任务的“查看实时终端过程”后再展开显示。
+                  </div>
                   <div
                     v-for="(round, roundIdx) in logRounds"
                     :key="round.key"
@@ -771,7 +774,7 @@
                               class="payloader-log-action-terminal-btn"
                               @click="selectTerminalAction(action)"
                             >
-                              {{ selectedLogActionId === action.id ? '正在查看终端过程' : '查看实时终端过程' }}
+                              {{ selectedLogActionId === action.id ? '收起实时终端过程' : '查看实时终端过程' }}
                             </button>
                           </div>
                           <details v-if="action.args" class="payloader-log-detail-block">
@@ -795,7 +798,7 @@
                     </div>
                   </div>
                 </div>
-                <aside class="payloader-log-terminal-panel">
+                <aside v-if="selectedLogAction" class="payloader-log-terminal-panel">
                   <div class="payloader-log-terminal-header">
                     <div>
                       <div class="payloader-log-terminal-eyebrow">实时终端过程</div>
@@ -813,9 +816,6 @@
                   </div>
                   <div v-if="selectedLogAction" class="payloader-log-terminal-body">
                     <pre class="payloader-log-terminal-output">{{ getTerminalPanelOutput(selectedLogAction) || '[当前尚无终端输出]' }}</pre>
-                  </div>
-                  <div v-else class="payloader-log-terminal-empty">
-                    选择一条已执行任务后，这里会持续显示它的实时终端输出。
                   </div>
                 </aside>
               </div>
@@ -1137,8 +1137,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import PayloaderToolbar from './components/PayloaderToolbar.vue';
+  import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+  import { marked } from 'marked';
+  import PayloaderToolbar from './components/PayloaderToolbar.vue';
 import PayloaderContent from './components/PayloaderContent.vue';
 import EncodingTools from './components/EncodingTools.vue';
 import { usePayloader } from './composables/usePayloaderState';
@@ -1404,7 +1405,7 @@ function openPentestModal() {
 
 function handlePentestEntry() {
   pentestModalError.value = '';
-  if (agentRunning.value) {
+  if (pentestTasks.value.length > 0) {
     showResultModal.value = true;
     if (!selectedTaskId.value && pentestTasks.value.length > 0) {
       selectedTaskId.value = pentestTasks.value[pentestTasks.value.length - 1].id;
@@ -1902,111 +1903,11 @@ function buildReportListItem(label: string, value: unknown, fallback: string, ma
 
 function renderReportMarkdown(md: string): string {
   try {
-    const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
-    const parts: string[] = [];
-    let paragraph: string[] = [];
-    let listItems: string[] = [];
-    let orderedItems: string[] = [];
-    let inCodeBlock = false;
-    let codeLines: string[] = [];
-
-    const flushParagraph = () => {
-      if (paragraph.length === 0) return;
-      parts.push(`<p>${formatReportInline(paragraph.join(' '))}</p>`);
-      paragraph = [];
-    };
-
-    const flushList = () => {
-      if (listItems.length === 0) return;
-      parts.push(`<ul>${listItems.map((item) => `<li>${formatReportInline(item)}</li>`).join('')}</ul>`);
-      listItems = [];
-    };
-
-    const flushOrderedList = () => {
-      if (orderedItems.length === 0) return;
-      parts.push(`<ol>${orderedItems.map((item) => `<li>${formatReportInline(item)}</li>`).join('')}</ol>`);
-      orderedItems = [];
-    };
-
-    const flushCodeBlock = () => {
-      if (!inCodeBlock) return;
-      parts.push(`<pre><code>${escapeReportHtml(codeLines.join('\n'))}</code></pre>`);
-      inCodeBlock = false;
-      codeLines = [];
-    };
-
-    for (const rawLine of lines) {
-      const line = rawLine.trimEnd();
-      const trimmed = line.trim();
-
-      if (trimmed.startsWith('```')) {
-        flushParagraph();
-        flushList();
-        flushOrderedList();
-        if (inCodeBlock) {
-          flushCodeBlock();
-        } else {
-          inCodeBlock = true;
-          codeLines = [];
-        }
-        continue;
-      }
-
-      if (inCodeBlock) {
-        codeLines.push(line);
-        continue;
-      }
-
-      if (!trimmed) {
-        flushParagraph();
-        flushList();
-        flushOrderedList();
-        continue;
-      }
-
-      const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-      if (heading) {
-        flushParagraph();
-        flushList();
-        flushOrderedList();
-        const level = heading[1].length;
-        parts.push(`<h${level}>${formatReportInline(heading[2].trim())}</h${level}>`);
-        continue;
-      }
-
-      if (trimmed === '---') {
-        flushParagraph();
-        flushList();
-        flushOrderedList();
-        parts.push('<hr>');
-        continue;
-      }
-
-      const unordered = trimmed.match(/^[-*]\s+(.+)$/);
-      if (unordered) {
-        flushParagraph();
-        flushOrderedList();
-        listItems.push(unordered[1].trim());
-        continue;
-      }
-
-      const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
-      if (ordered) {
-        flushParagraph();
-        flushList();
-        orderedItems.push(ordered[1].trim());
-        continue;
-      }
-
-      paragraph.push(trimmed);
-    }
-
-    flushParagraph();
-    flushList();
-    flushOrderedList();
-    flushCodeBlock();
-
-    return parts.join('');
+    marked.setOptions({
+      gfm: true,
+      breaks: true,
+    });
+    return String(marked.parse(String(md || '').replace(/\r\n/g, '\n')));
   } catch {
     return escapeReportHtml(String(md || '')).replace(/\n/g, '<br>');
   }
@@ -2021,21 +1922,39 @@ function buildFallbackPentestReport(params: {
   error?: string;
   actions?: Array<{ tool?: string; time?: string; result?: string; status?: string }>;
 }) {
+  const target = params.target || normalizedPentestTarget.value || '未知目标';
+  const vulnCount = params.vulnCount || 0;
+  const findingsCount = params.findingsCount || 0;
+  const riskLevel = getPentestRiskLevel(vulnCount, 0);
   return [
-    '## 总结',
-    params.error
-      ? `任务在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
-      : `任务在 ${getPhaseLabel(params.phase)} 阶段结束。`,
+    '# 风险探测报告',
     '',
-    `- 目标: ${params.target || normalizedPentestTarget.value || '未知目标'}`,
-    `- 风险等级: ${getPentestRiskLevel(params.vulnCount || 0, 0)}`,
+    '## 面向管理层的执行摘要',
+    '',
+    `1. 当前任务在 ${getPhaseLabel(params.phase)} 阶段结束，已识别 ${findingsCount} 项资产与 ${vulnCount} 项风险线索，当前总体风险等级按现有结果评估为 ${riskLevel}。`,
+    '2. 该阶段性报告基于当前已落盘结果整理，可用于企业侧先行开展暴露面收敛、补丁核查和访问控制加固。',
+    '3. 若后续正式报告已生成，应以正式报告中的漏洞清单、影响分析、攻击路径与分级整改建议为准。',
+    '',
+    '## 当前进展',
+    params.error
+      ? `本次风险探测在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
+      : `本次风险探测在 ${getPhaseLabel(params.phase)} 阶段结束。`,
+    '',
+    '## 概览',
+    `- 目标: ${target}`,
+    `- 风险等级: ${riskLevel}`,
     `- 任务轮次: ${countTaskRounds(params.actions as Array<Record<string, any>> | undefined) || 0} 轮`,
-    `- 发现资产: ${params.findingsCount || 0} 项`,
-    `- 发现漏洞: ${params.vulnCount || 0} 项`,
+    `- 发现资产: ${findingsCount} 项`,
+    `- 发现风险项: ${vulnCount} 项`,
+    '',
+    '## 企业处置建议',
+    '- 立即对目标资产开展暴露面收敛，限制互联网访问、临时下线高危服务或增加访问控制白名单。',
+    '- 对外网暴露服务执行补丁、版本与配置核查，优先验证远程命令执行、未授权访问、弱认证和敏感信息泄露相关风险。',
+    '- 对高权限账号、服务账号和共享凭据执行轮换，核查 SSH、数据库、FTP、Web 管理口等关键入口的认证与最小权限策略。',
+    '- 由应用负责人、系统负责人和安全负责人联合完成复测闭环，并保留日志、会话、命令回显等证据用于事件追踪。',
     '',
     '## 说明',
-    '- 当前仅能基于已有执行结果生成简要总结。',
-    '- 详细参数、原始输出和完整过程请查看右上角“日志”。',
+    '- 当前为阶段性兜底报告，详细漏洞证据与整改优先级请结合正式报告或任务日志中的完整输出执行。',
   ].join('\n');
 }
 
@@ -2053,6 +1972,162 @@ function extractPotentialVulnerabilityHints(report: string, vulnCount: number): 
     return [`已发现 ${vulnCount} 项潜在漏洞，建议结合执行日志继续验证利用条件。`];
   }
   return [];
+}
+
+function inferFindingSeverity(text: string) {
+  const normalized = String(text || '').toLowerCase();
+  if (/cve|rce|命令执行|远程执行|未授权|认证绕过|权限提升|提权|敏感信息泄露|高危|critical/.test(normalized)) {
+    return '高';
+  }
+  if (/弱口令|匿名访问|过期|暴露|风险|漏洞|warning|medium|中危/.test(normalized)) {
+    return '中';
+  }
+  return '待确认';
+}
+
+function inferFindingImpact(text: string) {
+  const normalized = String(text || '').toLowerCase();
+  if (/未授权|认证绕过|匿名访问/.test(normalized)) {
+    return '可能导致未授权访问，攻击者可在缺乏有效身份验证的情况下接触目标服务或数据。';
+  }
+  if (/命令执行|rce|远程执行|shell/.test(normalized)) {
+    return '一旦利用成功，可能导致目标主机被远程控制，进而扩大横向移动和数据泄露风险。';
+  }
+  if (/敏感信息|泄露|exposure|暴露/.test(normalized)) {
+    return '可能导致敏感配置、账户信息或业务数据外泄，增加后续攻击和合规风险。';
+  }
+  if (/弱口令|口令|密码/.test(normalized)) {
+    return '可能降低身份认证强度，增加暴力破解、撞库和横向移动的成功率。';
+  }
+  return '该风险可能扩大攻击面，建议结合资产重要性、暴露范围和利用条件进一步确认业务影响。';
+}
+
+function inferFindingRecommendation(text: string) {
+  const normalized = String(text || '').toLowerCase();
+  if (/匿名访问|ftp-anon|anonymous/.test(normalized)) {
+    return '关闭匿名访问能力，核查历史访问日志，并仅为必要账号授予最小权限。';
+  }
+  if (/弱口令|口令|密码/.test(normalized)) {
+    return '立即轮换相关账号口令，启用强密码策略，并补充多因素认证或访问来源限制。';
+  }
+  if (/sslv2|tls|证书|加密/.test(normalized)) {
+    return '禁用过时加密协议和弱加密套件，统一升级到受支持的 TLS 配置并重新验证兼容性。';
+  }
+  if (/未授权|认证绕过|匿名访问/.test(normalized)) {
+    return '补充身份认证与访问控制校验，限制来源范围，并对高风险接口增加审计与告警。';
+  }
+  if (/命令执行|rce|远程执行|shell/.test(normalized)) {
+    return '优先修复可利用入口，限制执行权限，隔离高危服务，并补充主机层检测与告警。';
+  }
+  if (/泄露|敏感信息|暴露/.test(normalized)) {
+    return '清理暴露信息，检查访问控制与脱敏策略，并排查相关凭据是否需要轮换。';
+  }
+  return '结合对应服务配置、补丁版本和访问控制策略进行加固，并在修复后安排复测。';
+}
+
+function buildFindingDetails(report: string, vulnCount: number) {
+  const lines = report
+    .split('\n')
+    .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
+    .filter((line) => line.length > 0);
+
+  const candidates = Array.from(new Set(
+    lines.filter((line) => /漏洞|风险|可利用|exploit|cve|未授权|匿名访问|弱口令|泄露|命令执行|提权|绕过/i.test(line))
+  )).slice(0, Math.min(Math.max(vulnCount, 1), 8));
+
+  if (candidates.length > 0) {
+    return candidates.map((item, index) => ({
+      title: `风险项 ${index + 1}`,
+      summary: item,
+      severity: inferFindingSeverity(item),
+      impact: inferFindingImpact(item),
+      recommendation: inferFindingRecommendation(item),
+    }));
+  }
+
+  if (vulnCount > 0) {
+    return Array.from({ length: vulnCount }).slice(0, 5).map((_, index) => ({
+      title: `风险项 ${index + 1}`,
+      summary: `已识别第 ${index + 1} 项待复核风险，建议结合执行日志确认具体漏洞位置、利用条件与影响范围。`,
+      severity: '待确认',
+      impact: '当前已发现异常迹象，但仍需结合原始输出与业务上下文确认最终影响。',
+      recommendation: '补充人工复核、证据留存与复测验证，确认是否具备实际可利用性。',
+    }));
+  }
+
+  return [];
+}
+
+function buildGeneralRemediations(findings: Array<{ recommendation: string }>, failedLogs: PentestLogEntry[]) {
+  const recommendations = Array.from(new Set(findings.map((item) => item.recommendation).filter(Boolean)));
+  if (failedLogs.length > 0) {
+    recommendations.push('针对失败或中断的探测步骤补充人工复核，避免因工具依赖、权限或网络条件导致漏报。');
+  }
+  recommendations.push('修复完成后重新执行风险探测，确认风险项已关闭且未引入新的暴露面。');
+  return recommendations.slice(0, 6);
+}
+
+function buildAssetSummary(target: string, logs: PentestLogEntry[], findingsCount: number, vulnCount: number) {
+  const actionableLogs = logs.filter((log) => !String(log.tool || '').startsWith('_'));
+  const surfaces = Array.from(new Set(
+    actionableLogs.map((log) => summarizeActionPayload(log.surface, '', 40)).filter(Boolean)
+  )).slice(0, 6);
+  const tools = Array.from(new Set(
+    actionableLogs.map((log) => summarizeActionPayload(log.tool, '', 40)).filter(Boolean)
+  )).slice(0, 8);
+
+  const corpus = actionableLogs
+    .map((log) => [
+      summarizeActionPayload(log.args, '', 240),
+      summarizeActionPayload(log.result, '', 240),
+      summarizeActionPayload(log.full_stdout, '', 240),
+    ].filter(Boolean).join(' '))
+    .join(' ');
+
+  const portMatches = Array.from(new Set((corpus.match(/\b\d{1,5}\/tcp\b|\b\d{1,5}\/udp\b|\bport\s+\d{1,5}\b/gi) || [])
+    .map((item) => item.replace(/^port\s+/i, '').toLowerCase())))
+    .slice(0, 10);
+
+  const serviceMatches = Array.from(new Set((corpus.match(/\b(ssh|ftp|http|https|mysql|postgresql|postgres|redis|smb|rpcbind|telnet|smtp|vnc|ajp13|distccd|java-rmi|nginx|apache|tomcat)\b/gi) || [])
+    .map((item) => item.toLowerCase())))
+    .slice(0, 10);
+
+  return [
+    `- **目标资产**：${target || '未知目标'}`,
+    `- **资产发现概况**：共识别 ${findingsCount || 0} 项资产线索，关联 ${vulnCount || 0} 项风险。`,
+    surfaces.length > 0 ? `- **涉及攻击面**：${surfaces.join('、')}` : '- **涉及攻击面**：当前以基础探测结果为主，建议结合日志继续细化。',
+    portMatches.length > 0 ? `- **关键端口/入口**：${portMatches.join('、')}` : '- **关键端口/入口**：当前报告未提取到明确端口信息，可从执行日志继续确认。',
+    serviceMatches.length > 0 ? `- **关联服务**：${serviceMatches.join('、')}` : '- **关联服务**：当前报告未提取到明确服务名称，可结合原始输出补充。',
+    tools.length > 0 ? `- **证据来源工具**：${tools.join('、')}` : '- **证据来源工具**：暂无可用工具证据摘要。',
+  ];
+}
+
+function buildRemediationPlan(findings: Array<{ title: string; summary: string; severity: string; recommendation: string }>) {
+  const prioritized = findings.length > 0 ? findings : [{
+    title: '通用整改项',
+    summary: '当前未抽取到明确风险项名称，建议先依据完整日志补齐风险与资产映射。',
+    severity: '待确认',
+    recommendation: '补充人工复核、风险确认和整改闭环验证。',
+  }];
+
+  return prioritized.slice(0, 6).map((item, index) => {
+    const priority = item.severity === '高' ? 'P1（优先立即处置）' : item.severity === '中' ? 'P2（优先安排修复）' : 'P3（需人工确认后处置）';
+    const verification = item.severity === '高'
+      ? '修复后立即复测对应入口，并确认未再出现未授权访问、远程执行或敏感信息暴露。'
+      : item.severity === '中'
+        ? '修复后对相关服务、配置和访问控制进行抽样复测，确认风险已收敛。'
+        : '完成配置核查与证据复核后，再执行针对性复测确认整改效果。';
+
+    return [
+      `### 整改项 ${index + 1}：${item.title}`,
+      `- **对应风险**：${item.summary}`,
+      `- **整改优先级**：${priority}`,
+      `- **修复动作**：${item.recommendation}`,
+      `- **复测要求**：${verification}`,
+      `- **交付建议**：保留修复前后配置差异、执行截图与复测结果，纳入整改闭环记录。`,
+      '',
+    ];
+  }).flat();
 }
 
 function getPentestRiskLevel(vulnCount: number, failedCount: number) {
@@ -2093,17 +2168,23 @@ function buildUserFacingPentestReport(params: {
       .map((log) => summarizeReportValue(log.llm_decision, '', 220))
       .filter(Boolean)
   )).slice(0, 4).map((item, index) => `${index + 1}. ${item}`);
-  const vulnHints = extractPotentialVulnerabilityHints(params.backendReport || '', params.vulnCount || 0);
-  const riskLevel = getPentestRiskLevel(params.vulnCount || 0, failedLogs.length);
   const target = params.target || normalizedPentestTarget.value || '未知目标';
+  const vulnHints = extractPotentialVulnerabilityHints(params.backendReport || '', params.vulnCount || 0);
+  const findingDetails = buildFindingDetails(params.backendReport || '', params.vulnCount || 0);
+  const remediationItems = buildGeneralRemediations(findingDetails, failedLogs);
+  const assetSummary = buildAssetSummary(target, actionableLogs, params.findingsCount || 0, params.vulnCount || 0);
+  const remediationPlan = buildRemediationPlan(findingDetails);
+  const riskLevel = getPentestRiskLevel(params.vulnCount || 0, failedLogs.length);
   const phaseLabel = getPhaseLabel(params.phase);
   const workedOnText = workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测';
   const statusSummary = params.error
-    ? `任务在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
-    : `任务已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核和整理证据。`;
+    ? `本次风险探测在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
+    : `本次风险探测已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核、修复和留痕。`;
 
   return [
-    '# 渗透任务总结',
+    '# 风险探测报告',
+    '',
+    '## 执行总结',
     statusSummary,
     '',
     '## 概览',
@@ -2114,10 +2195,10 @@ function buildUserFacingPentestReport(params: {
     `- **成功项**：${completedLogs.length} 项`,
     `- **失败项**：${failedLogs.length} 项`,
     `- **发现资产**：${params.findingsCount || 0} 项`,
-    `- **发现漏洞**：${params.vulnCount || 0} 项`,
+    `- **发现风险项**：${params.vulnCount || 0} 项`,
     '',
-    '## 本次完成',
-    workedOnText,
+    '## 总体结论',
+    `本次风险探测围绕目标 **${target}** 完成了 ${workedOnText} 等工作。综合已确认风险、失败项和可用证据，当前目标整体风险等级评估为 **${riskLevel}**。${params.vulnCount ? '建议优先处理已识别风险，并在修复后安排复测。' : '当前未发现明确高风险漏洞，但仍建议结合业务场景继续复核。'}`,
     '',
     '## 关键结果',
     ...(successItems.length > 0 ? successItems : ['- 暂无明确成功结果']),
@@ -2125,14 +2206,37 @@ function buildUserFacingPentestReport(params: {
     '## 失败与阻塞',
     ...(failureItems.length > 0 ? failureItems : ['- 暂无明确失败项']),
     '',
-    '## 重点风险',
+    '## 风险摘要',
     ...(vulnHints.length > 0 ? vulnHints.map((item) => `- ${item}`) : ['- 暂未发现明确可直接利用的漏洞，建议结合日志继续验证。']),
+    '',
+    '## 漏洞资产总结',
+    ...assetSummary,
+    '',
+    '## 风险明细',
+    ...(findingDetails.length > 0
+      ? findingDetails.flatMap((item) => [
+          `### ${item.title}（${item.severity}）`,
+          `- **发现内容**：${item.summary}`,
+          `- **影响分析**：${item.impact}`,
+          `- **处置建议**：${item.recommendation}`,
+          '',
+        ])
+      : ['- 当前未提取到可单独成项的风险明细，建议结合完整日志与原始输出继续复核。', '']),
+    '## 修复建议',
+    ...(remediationItems.length > 0 ? remediationItems.map((item) => `- ${item}`) : ['- 暂无补充修复建议']),
+    '',
+    '## 漏洞修复整改报告',
+    ...remediationPlan,
+    '## 复测建议',
+    '- 修复完成后针对已识别风险项逐一复测，确认利用路径、弱配置或暴露面已被关闭。',
+    '- 对失败或未完成的探测步骤安排补测，避免因环境因素导致风险遗漏。',
+    '- 保留本次执行日志、关键截图和原始输出，作为后续整改闭环与审计留痕依据。',
     '',
     '## AI 决策摘要',
     ...(decisionItems.length > 0 ? decisionItems : ['1. 暂无 AI 决策记录']),
     '',
     '## 说明',
-    '- 页面展示的是面向阅读的总结版，详细参数、原始输出和完整过程请查看右上角“日志”。',
+    '- 页面展示的是面向阅读的风险探测报告，详细参数、原始输出和完整过程请查看右上角“日志”。',
   ].join('\n');
 }
 
@@ -2243,7 +2347,7 @@ async function buildInterruptedPentestSummary(taskId: string, target: string = '
     const report = await aiService.chatStream([
       {
         role: 'system',
-        content: '你是一名渗透测试总结助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。必须包含：1. 中断说明 2. 当前阶段与进展 3. 已获得的有效信息 4. 已确认风险/异常 5. 未完成项与下一步建议。不要虚构不存在的结果。',
+        content: '你是一名面向企业客户的风险探测报告助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。报告必须正式、客观，并给出企业侧可执行的漏洞解决方案。必须包含：1. 面向管理层的执行摘要 2. 当前阶段与进展 3. 已确认风险/异常 4. 对企业的分级修复建议（立即/24小时内/一周内/长期）5. 未完成项与下一步建议。不要虚构不存在的结果，不要输出内部调试口吻。',
       },
       {
         role: 'user',
@@ -2260,7 +2364,7 @@ ${llmDecisions || '暂无 AI 决策记录'}
 最近执行日志:
 ${recentLogs || '暂无执行日志'}
 
-请输出一份阶段性总结报告，明确哪些信息已经确认，哪些任务尚未完成。`,
+请输出一份阶段性总结报告，明确哪些信息已经确认、企业当前应立即采取哪些措施，以及后续仍需补充的验证工作。`,
       },
     ]);
 
@@ -2287,7 +2391,9 @@ ${recentLogs || '暂无执行日志'}
 async function startHostAgent() {
   const aiConfig = getAIConfig();
   if (!aiConfig || !aiConfig.apiKey) {
-    showResultModal.value = true;
+    pentestModalError.value = 'AI 服务未配置，请先在设置中完成 AI 模型配置';
+    (window as any).showNotification?.('AI 服务未配置，请先在设置中完成 AI 模型配置', 'warning');
+    (window as any).openAISettingsMenu?.();
     return;
   }
 
@@ -2609,29 +2715,19 @@ function getTerminalPanelOutput(action: PentestLogEntry | undefined) {
 }
 
 function selectTerminalAction(action: PentestLogEntry) {
-  selectedLogActionId.value = action.id || "";
-}
-
-function pickPreferredTerminalAction(actions: PentestLogEntry[]) {
-  const executable = getRoundExecutionActions(actions);
-  if (executable.length === 0) return undefined;
-  return executable.find((item) => item.status === "running") || executable[executable.length - 1];
+  const nextId = action.id || "";
+  selectedLogActionId.value = selectedLogActionId.value === nextId ? "" : nextId;
 }
 
 function syncSelectedTerminalAction() {
   const allActions = logData.value.filter((item) => item.tool !== "_llm_wait");
-  if (allActions.length === 0) {
-    selectedLogActionId.value = "";
-    return;
-  }
   if (selectedLogActionId.value) {
     const stillExists = allActions.some((item) => item.id === selectedLogActionId.value);
     if (stillExists) {
       return;
     }
   }
-  const preferred = pickPreferredTerminalAction(allActions);
-  selectedLogActionId.value = preferred?.id || "";
+  selectedLogActionId.value = "";
 }
 
 function normalizeLogEntry(log: Record<string, unknown>) {
@@ -2660,9 +2756,9 @@ function normalizeLogEntry(log: Record<string, unknown>) {
 
 const selectedLogAction = computed<PentestLogEntry | undefined>(() => {
   if (!selectedLogActionId.value) {
-    return pickPreferredTerminalAction(logData.value);
+    return undefined;
   }
-  return logData.value.find((item) => item.id === selectedLogActionId.value) || pickPreferredTerminalAction(logData.value);
+  return logData.value.find((item) => item.id === selectedLogActionId.value);
 });
 
 const logRounds = computed<PentestLogRound[]>(() => {
@@ -4569,6 +4665,40 @@ onMounted(() => {
 .payloader-agent-report-content ol { margin: 8px 0 12px 18px; padding: 0; }
 .payloader-agent-report-content li { margin: 4px 0; padding-left: 4px; }
 .payloader-agent-report-content hr { border: none; border-top: 1px solid var(--border-color); margin: 12px 0; }
+.payloader-agent-report-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  table-layout: fixed;
+  display: block;
+  overflow-x: auto;
+  white-space: normal;
+}
+.payloader-agent-report-content thead {
+  background: var(--bg-secondary);
+}
+.payloader-agent-report-content th,
+.payloader-agent-report-content td {
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+  min-width: 96px;
+}
+.payloader-agent-report-content th {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.payloader-agent-report-content blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  color: var(--text-secondary);
+}
 
 .payloader-agent-skill-summary {
   font-size: 12px;
@@ -5633,13 +5763,27 @@ onMounted(() => {
 
 .payloader-log-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
+.payloader-log-layout--with-terminal {
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+}
+
 .payloader-log-rounds {
   min-width: 0;
+}
+
+.payloader-log-terminal-inline-hint {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.04);
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .payloader-log-terminal-panel {

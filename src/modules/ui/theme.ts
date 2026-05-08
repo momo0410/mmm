@@ -4,7 +4,7 @@
  */
 
 export class ThemeManager {
-  private currentTheme: 'light' | 'dark' | 'sakura' = 'light';
+  private currentTheme: 'light' | 'dark' = 'light';
 
   /**
    * 切换主题
@@ -19,9 +19,6 @@ export class ThemeManager {
         newTheme = 'dark';
         break;
       case 'dark':
-        newTheme = 'sakura';
-        break;
-      case 'sakura':
         newTheme = 'light';
         break;
       default:
@@ -39,21 +36,21 @@ export class ThemeManager {
     const body = document.body;
     const html = document.documentElement;
 
-    // 设置data-theme属性
+    // 设置 data-theme 属性
     body.setAttribute('data-theme', theme);
     html.setAttribute('data-theme', theme);
 
-    // 更新body类名
-    body.classList.remove('light-theme', 'dark-theme', 'sakura-theme');
+    // 更新 body 类名
+    body.classList.remove('light-theme', 'dark-theme');
     body.classList.add(`${theme}-theme`);
 
-    // 动态加载主题CSS文件
+    // 动态加载主题 CSS 文件
     this.loadThemeCSS(theme);
 
-    // 保存到localStorage
+    // 保存到 localStorage
     localStorage.setItem('LERT-theme', theme);
 
-    this.currentTheme = theme as 'light' | 'dark' | 'sakura';
+    this.currentTheme = theme as 'light' | 'dark';
 
     console.log('主题已设置为:', theme);
   }
@@ -98,7 +95,7 @@ export class ThemeManager {
     // 从localStorage加载保存的主题
     const savedTheme = localStorage.getItem('LERT-theme');
 
-    if (savedTheme && ['light', 'dark', 'sakura'].includes(savedTheme)) {
+    if (savedTheme && ['light', 'dark'].includes(savedTheme)) {
       this.setTheme(savedTheme);
     } else {
       // 检查系统偏好
@@ -152,19 +149,6 @@ export class ThemeManager {
           surface: '#1e293b',
           text: '#f1f5f9'
         }
-      },
-      sakura: {
-        name: '樱花粉',
-        icon: '🌸',
-        description: '温柔浪漫的樱花主题',
-        colors: {
-          primary: '#ff9bb3',
-          secondary: '#ffb3c1',
-          accent: '#ffc0cb',
-          background: '#fef9f9',
-          surface: '#fffefe',
-          text: '#744c4c'
-        }
       }
     };
 
@@ -177,8 +161,7 @@ export class ThemeManager {
   getAvailableThemes() {
     return [
       this.getThemeConfig('light'),
-      this.getThemeConfig('dark'),
-      this.getThemeConfig('sakura')
+      this.getThemeConfig('dark')
     ];
   }
 
@@ -271,13 +254,6 @@ export class ThemeManager {
    */
   isLightTheme(): boolean {
     return this.currentTheme === 'light';
-  }
-
-  /**
-   * 检查是否为樱花主题
-   */
-  isSakuraTheme(): boolean {
-    return this.currentTheme === 'sakura';
   }
 
   /**
