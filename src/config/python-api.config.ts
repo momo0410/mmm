@@ -521,6 +521,7 @@ class PythonApi {
       cred_count: number;
       actions_count: number;
       actions: Array<{tool: string; args: string; time: string; result: string}>;
+      token_usage?: Record<string, any>;
       task_id: string;
       error?: string;
     }>('GET', '/agent/pentest/status', undefined, { task_id: taskId });

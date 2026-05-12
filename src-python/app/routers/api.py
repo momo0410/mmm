@@ -1724,6 +1724,7 @@ async def pentest_status(task_id: str):
         "cred_count": len(state.data["credentials"]),
         "actions_count": len(actions),
         "actions": slim_actions,
+        "token_usage": state.data.get("token_usage", {}),
         "task_id": task_id,
         "error": tinfo.get("error"),
     }

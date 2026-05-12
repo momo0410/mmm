@@ -314,6 +314,11 @@
                     <span class="payloader-agent-live-label">漏洞发现</span>
                     <span class="payloader-agent-live-value">{{ agentResult.vuln_count || 0 }} 项</span>
                   </div>
+                  <div class="payloader-agent-live-stat payloader-agent-live-stat--token">
+                    <span class="payloader-agent-live-label">Token 消耗</span>
+                    <span class="payloader-agent-live-value">{{ currentTokenUsageDisplay }}</span>
+                    <span class="payloader-agent-live-meta">{{ currentTokenUsageMeta }}</span>
+                  </div>
                 </div>
                 <div v-if="currentActionSummary" class="payloader-agent-current-action">
                   <span class="payloader-agent-current-action-dot"></span>
@@ -1508,6 +1513,7 @@ async function interruptTaskAndClose() {
       vuln_count: summary.vulnCount,
       actions_count: summary.actionsCount,
       actions: summary.actions,
+      token_usage: summary.tokenUsage || {},
     });
   } catch (err: any) {
     (window as any).showNotification?.(err?.message || '中断任务失败', 'error');
@@ -1653,6 +1659,67 @@ const currentActionSummary = computed(() => {
     return '当前轮次任务正在执行中';
   }
   return '';
+});
+
+function normalizeTokenUsageBucket(input: any) {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+  const prompt = Number(input.prompt_tokens ?? 0) || 0;
+  const completion = Number(input.completion_tokens ?? 0) || 0;
+  const total = Number(input.total_tokens ?? (prompt + completion)) || 0;
+  const calls = Number(input.calls ?? 0) || 0;
+  if (prompt <= 0 && completion <= 0 && total <= 0 && calls <= 0) {
+    return null;
+  }
+  return { prompt, completion, total, calls };
+}
+
+function formatTokenCount(value: number) {
+  const normalized = Number(value || 0);
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return '--';
+  }
+  return normalized.toLocaleString('zh-CN');
+}
+
+const currentTokenUsage = computed(() => {
+  const usageMap = agentResult.value?.token_usage;
+  if (!usageMap || typeof usageMap !== 'object') {
+    return null;
+  }
+  const pentest = normalizeTokenUsageBucket(usageMap.pentest_llm);
+  const report = normalizeTokenUsageBucket(usageMap.report_ai);
+  const total = (pentest?.total || 0) + (report?.total || 0);
+  const calls = (pentest?.calls || 0) + (report?.calls || 0);
+  if (!pentest && !report && total <= 0 && calls <= 0) {
+    return null;
+  }
+  return { pentest, report, total, calls };
+});
+
+const currentTokenUsageDisplay = computed(() => {
+  if (!currentTokenUsage.value) {
+    return '--';
+  }
+  return `${formatTokenCount(currentTokenUsage.value.total)} tokens`;
+});
+
+const currentTokenUsageMeta = computed(() => {
+  if (!currentTokenUsage.value) {
+    return '等待上游返回 usage';
+  }
+  const parts: string[] = [];
+  if (currentTokenUsage.value.pentest) {
+    parts.push(`主流程 ${formatTokenCount(currentTokenUsage.value.pentest.total)}`);
+  }
+  if (currentTokenUsage.value.report) {
+    parts.push(`报告 ${formatTokenCount(currentTokenUsage.value.report.total)}`);
+  }
+  if (parts.length === 0 && currentTokenUsage.value.calls > 0) {
+    parts.push(`${currentTokenUsage.value.calls} 次调用`);
+  }
+  return parts.join(' / ') || '等待上游返回 usage';
 });
 
 const currentPlanningStream = computed(() => {
@@ -2253,6 +2320,7 @@ async function resolvePentestFinalReport(params: {
   let backendReport = '';
   let finalPhase = params.phase;
   let normalizedLogs: PentestLogEntry[] = [];
+  let tokenUsage: Record<string, any> = {};
 
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
@@ -2262,6 +2330,7 @@ async function resolvePentestFinalReport(params: {
     ]);
     backendReport = String(report?.report || '').trim();
     finalPhase = report?.phase || params.phase;
+    tokenUsage = report?.token_usage || {};
     normalizedLogs = (logs?.actions || []).map((item: any) => normalizeLogEntry(item));
   } catch {
     // ignore and use fallback
@@ -2275,6 +2344,7 @@ async function resolvePentestFinalReport(params: {
       logs: normalizedLogs,
     }) || buildFallbackPentestReport(params),
     phase: finalPhase,
+    tokenUsage,
   };
 }
 
@@ -2296,6 +2366,7 @@ async function buildInterruptedPentestSummary(taskId: string, target: string = '
   const actionsCount = status?.actions_count ?? agentResult.value?.actions_count ?? normalizedLogs.length ?? 0;
   const actions = Array.isArray(status?.actions) ? status!.actions : (agentResult.value?.actions || []);
   const resolvedTarget = target || selectedTask.value?.target || '';
+  const tokenUsage = status?.token_usage || agentResult.value?.token_usage || {};
 
   const fallbackReport = buildUserFacingPentestReport({
     phase,
@@ -2323,6 +2394,7 @@ async function buildInterruptedPentestSummary(taskId: string, target: string = '
       vulnCount,
       actionsCount,
       actions,
+      tokenUsage,
     };
   }
 
@@ -2395,6 +2467,17 @@ ${recentLogs || '暂无执行日志'}
       vulnCount,
       actionsCount,
       actions,
+      tokenUsage: aiUsage && aiUsage.total_tokens > 0
+        ? {
+            ...tokenUsage,
+            report_ai: {
+              ...(tokenUsage?.report_ai || {}),
+              prompt_tokens: aiUsage.prompt_tokens,
+              completion_tokens: aiUsage.completion_tokens,
+              total_tokens: aiUsage.total_tokens,
+            },
+          }
+        : tokenUsage,
     };
   } catch {
     return {
@@ -2404,6 +2487,7 @@ ${recentLogs || '暂无执行日志'}
       vulnCount,
       actionsCount,
       actions,
+      tokenUsage,
     };
   }
 }
@@ -2511,6 +2595,7 @@ async function restoreRunningPentestTask() {
           vuln_count: status.vuln_count,
           actions_count: status.actions_count,
           actions: status.actions,
+          token_usage: status.token_usage || {},
         },
         error: '',
         executionMode: 'serial',
@@ -2567,6 +2652,7 @@ async function pollStatusForTask(taskId: string) {
         vuln_count: status.vuln_count,
         actions_count: status.actions_count,
         actions: status.actions,
+        token_usage: report.tokenUsage || status.token_usage || {},
       });
     } else {
       updateTaskResult(taskId, {
@@ -2577,6 +2663,7 @@ async function pollStatusForTask(taskId: string) {
         vuln_count: status.vuln_count,
         actions_count: status.actions_count,
         actions: status.actions,
+        token_usage: status.token_usage || {},
       });
       updateTaskInList(taskId, {
         phase: status.phase,
@@ -4115,6 +4202,18 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.payloader-agent-live-meta {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.payloader-agent-live-stat--token {
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.06), rgba(168, 85, 247, 0.04));
+  border-color: rgba(59, 130, 246, 0.16);
 }
 
 .payloader-agent-live-log {
