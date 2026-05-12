@@ -1623,6 +1623,16 @@ class PentestStartRequest(BaseModel):
     llm_max_retries: int = Field(1, ge=0, le=10, description="LLM 请求最大重试次数")
     llm_retry_backoff_seconds: float = Field(1.2, ge=0.1, le=30.0, description="LLM 重试退避秒数")
 
+
+class PentestTokenUsageRequest(BaseModel):
+    task_id: str = Field(..., description="渗透任务 ID")
+    category: str = Field(..., description="token 分类，如 pentest_llm / report_ai")
+    prompt_tokens: int = Field(0, ge=0, description="输入 token")
+    completion_tokens: int = Field(0, ge=0, description="输出 token")
+    total_tokens: int = Field(0, ge=0, description="总 token")
+    model: str = Field("", description="模型名")
+    provider: str = Field("", description="提供商")
+
 @router.post("/agent/pentest/start")
 async def pentest_start(req: PentestStartRequest):
     task_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
@@ -1757,7 +1767,58 @@ async def pentest_get_report(task_id: str):
     report_path = state.generate_report()
     with open(report_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return {"report": content, "phase": state.data["phase"], "task_id": task_id}
+    return {
+        "report": content,
+        "phase": state.data["phase"],
+        "task_id": task_id,
+        "token_usage": state.data.get("token_usage", {}),
+    }
+
+
+@router.post("/agent/token-usage")
+async def pentest_record_token_usage(req: PentestTokenUsageRequest):
+    state = _load_task_state(req.task_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    usage = {
+        "prompt_tokens": req.prompt_tokens,
+        "completion_tokens": req.completion_tokens,
+        "total_tokens": req.total_tokens,
+    }
+    recorded = state.record_token_usage(
+        req.category,
+        usage,
+        model=req.model,
+        provider=req.provider,
+    )
+    if not recorded:
+        raise HTTPException(status_code=400, detail="token usage 无效")
+
+    summary = (
+        f"category={req.category} "
+        f"prompt={req.prompt_tokens} "
+        f"completion={req.completion_tokens} "
+        f"total={req.total_tokens}"
+    )
+    if req.model:
+        summary += f" model={req.model}"
+    if req.provider:
+        summary += f" provider={req.provider}"
+
+    state.log_action(
+        "_token_usage",
+        req.category,
+        result_summary=summary,
+        llm_decision="记录本次 AI token 消耗统计。",
+    )
+
+    return {
+        "success": True,
+        "task_id": req.task_id,
+        "category": req.category,
+        "token_usage": state.data.get("token_usage", {}),
+    }
 
 @router.get("/agent/history")
 async def pentest_history():

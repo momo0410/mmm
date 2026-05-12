@@ -114,14 +114,14 @@
           v-if="state.viewMode === 'list'"
           :class="['payloader-btn', 'payloader-btn--pentest', { 'is-running': agentRunning }]"
           @click="handlePentestEntry"
-          :title="agentRunning ? `${activeRunningCount} 个任务运行中` : '风险探测'"
+          :title="agentRunning ? `${activeRunningCount} 个任务运行中` : '渗透测试'"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
             <path d="M2 17l10 5 10-5"></path>
             <path d="M2 12l10 5 10-5"></path>
           </svg>
-          {{ agentRunning ? `任务 (${activeRunningCount})` : '风险探测' }}
+          {{ agentRunning ? `任务 (${activeRunningCount})` : '渗透测试' }}
           <span v-if="agentRunning" class="payloader-btn-running-badge">
             <span class="payloader-btn-running-dot"></span>
             {{ activeRunningCount }}
@@ -173,11 +173,11 @@
       <div v-if="showPentestModal" class="payloader-modal-overlay" @click.self="closePentestModal">
         <div class="payloader-modal">
           <div class="payloader-modal-header">
-            <h3>风险探测</h3>
+            <h3>渗透测试</h3>
             <button class="payloader-modal-close" @click="closePentestModal">&times;</button>
           </div>
           <div class="payloader-modal-body">
-            <p class="payloader-modal-desc">请输入要检测的目标 IP 地址或域名，系统会按以下 5 个阶段执行自动化安全验证流程。</p>
+            <p class="payloader-modal-desc">请输入要检测的目标 IP 地址或域名，系统会执行自动化安全验证流程。</p>
             <div class="payloader-modal-input-group">
               <label class="payloader-modal-label" for="payloader-pentest-target">目标 IP / 域名</label>
               <input
@@ -266,7 +266,7 @@
           <div class="payloader-modal-body payloader-modal-body--scroll">
             <!-- 选择任务 -->
             <div v-if="!selectedTask" class="payloader-agent-task-list">
-              <p class="payloader-agent-task-list-hint" v-if="pentestTasks.length === 0">暂无任务，点击 <strong>+</strong> 启动新的风险探测</p>
+              <p class="payloader-agent-task-list-hint" v-if="pentestTasks.length === 0">暂无任务，点击 <strong>+</strong> 启动新的渗透测试</p>
               <div v-for="task in pentestTasks" :key="task.id" class="payloader-agent-task-card" @click="selectedTaskId = task.id">
                 <div class="payloader-agent-task-card-header">
                   <span class="payloader-agent-task-card-status" :class="{ running: task.running, completed: !task.running && !task.error, failed: task.error }">
@@ -288,7 +288,7 @@
               <div class="payloader-agent-running-header">
                 <div class="payloader-agent-running-spinner"></div>
                 <div class="payloader-agent-running-header-text">
-                  <p class="payloader-agent-running-text">正在对 {{ selectedTask.target || '目标资产' }} 执行风险探测...</p>
+                  <p class="payloader-agent-running-text">正在对 {{ selectedTask.target || '目标资产' }} 执行渗透测试...</p>
                   <p class="payloader-agent-running-sub">
                     <span class="payloader-agent-phase-badge">{{ getPhaseLabel(agentResult?.phase) }}</span>
                     <span v-if="agentRoundCount > 0" class="payloader-agent-round-info">第 {{ agentRoundCount }} 轮任务</span>
@@ -361,7 +361,7 @@
               <!-- 状态栏 -->
               <div class="payloader-agent-summary">
                 <div class="payloader-agent-summary-header">
-                  <h3>阶段化风险探测报告</h3>
+                  <h3>阶段化渗透测试报告</h3>
                   <span :class="['payloader-agent-status', agentResult.status]">
                     {{ agentResult.status === 'completed' ? '已完成' : agentResult.status === 'failed' ? '失败' : '运行中' }}
                   </span>
@@ -508,7 +508,7 @@
                     <path d="M2 17l10 5 10-5"></path>
                     <path d="M2 12l10 5 10-5"></path>
                   </svg>
-                  风险探测结果分析
+                  渗透测试结果分析
                 </h4>
                 
                 <div v-if="agentResult.final.attack_type" class="payloader-agent-attack-type">
@@ -572,7 +572,7 @@
                     <line x1="16" y1="17" x2="8" y2="17"></line>
                     <polyline points="10 9 9 9 8 9"></polyline>
                   </svg>
-                  完整风险探测报告
+                  完整渗透测试报告
                 </h4>
                 <div class="payloader-agent-report-content" v-html="renderReportMarkdown(agentResult.final.report)"></div>
               </div>
@@ -653,8 +653,8 @@
               <section v-if="logReport" class="payloader-log-report-section">
                 <div class="payloader-log-report-header">
                   <div>
-                    <div class="payloader-log-report-eyebrow">风险探测报告</div>
-                    <h4>本次风险探测总结</h4>
+                    <div class="payloader-log-report-eyebrow">渗透测试报告</div>
+                    <h4>本次渗透测试总结</h4>
                   </div>
                   <button
                     v-if="logData.length > 0"
@@ -1366,9 +1366,9 @@ let taskPollTimers = new Map<string, ReturnType<typeof setInterval>>();
 function loadPentestExecutionMode(): PentestExecutionMode {
   try {
     const cached = localStorage.getItem(PENTEST_EXECUTION_MODE_STORAGE_KEY);
-    return cached === 'serial' ? 'serial' : 'parallel';
+    return cached === 'parallel' ? 'parallel' : 'serial';
   } catch {
-    return 'parallel';
+    return 'serial';
   }
 }
 
@@ -1927,7 +1927,7 @@ function buildFallbackPentestReport(params: {
   const findingsCount = params.findingsCount || 0;
   const riskLevel = getPentestRiskLevel(vulnCount, 0);
   return [
-    '# 风险探测报告',
+    '# 渗透测试报告',
     '',
     '## 面向管理层的执行摘要',
     '',
@@ -1937,8 +1937,8 @@ function buildFallbackPentestReport(params: {
     '',
     '## 当前进展',
     params.error
-      ? `本次风险探测在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
-      : `本次风险探测在 ${getPhaseLabel(params.phase)} 阶段结束。`,
+      ? `本次渗透测试在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
+      : `本次渗透测试在 ${getPhaseLabel(params.phase)} 阶段结束。`,
     '',
     '## 概览',
     `- 目标: ${target}`,
@@ -2063,7 +2063,7 @@ function buildGeneralRemediations(findings: Array<{ recommendation: string }>, f
   if (failedLogs.length > 0) {
     recommendations.push('针对失败或中断的探测步骤补充人工复核，避免因工具依赖、权限或网络条件导致漏报。');
   }
-  recommendations.push('修复完成后重新执行风险探测，确认风险项已关闭且未引入新的暴露面。');
+  recommendations.push('修复完成后重新执行渗透测试，确认风险项已关闭且未引入新的暴露面。');
   return recommendations.slice(0, 6);
 }
 
@@ -2178,11 +2178,11 @@ function buildUserFacingPentestReport(params: {
   const phaseLabel = getPhaseLabel(params.phase);
   const workedOnText = workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测';
   const statusSummary = params.error
-    ? `本次风险探测在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
-    : `本次风险探测已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核、修复和留痕。`;
+    ? `本次渗透测试在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
+    : `本次渗透测试已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核、修复和留痕。`;
 
   return [
-    '# 风险探测报告',
+    '# 渗透测试报告',
     '',
     '## 执行总结',
     statusSummary,
@@ -2198,7 +2198,7 @@ function buildUserFacingPentestReport(params: {
     `- **发现风险项**：${params.vulnCount || 0} 项`,
     '',
     '## 总体结论',
-    `本次风险探测围绕目标 **${target}** 完成了 ${workedOnText} 等工作。综合已确认风险、失败项和可用证据，当前目标整体风险等级评估为 **${riskLevel}**。${params.vulnCount ? '建议优先处理已识别风险，并在修复后安排复测。' : '当前未发现明确高风险漏洞，但仍建议结合业务场景继续复核。'}`,
+    `本次渗透测试围绕目标 **${target}** 完成了 ${workedOnText} 等工作。综合已确认风险、失败项和可用证据，当前目标整体风险等级评估为 **${riskLevel}**。${params.vulnCount ? '建议优先处理已识别风险，并在修复后安排复测。' : '当前未发现明确高风险漏洞，但仍建议结合业务场景继续复核。'}`,
     '',
     '## 关键结果',
     ...(successItems.length > 0 ? successItems : ['- 暂无明确成功结果']),
@@ -2236,7 +2236,7 @@ function buildUserFacingPentestReport(params: {
     ...(decisionItems.length > 0 ? decisionItems : ['1. 暂无 AI 决策记录']),
     '',
     '## 说明',
-    '- 页面展示的是面向阅读的风险探测报告，详细参数、原始输出和完整过程请查看右上角“日志”。',
+    '- 页面展示的是面向阅读的渗透测试报告，详细参数、原始输出和完整过程请查看右上角“日志”。',
   ].join('\n');
 }
 
@@ -2347,7 +2347,7 @@ async function buildInterruptedPentestSummary(taskId: string, target: string = '
     const report = await aiService.chatStream([
       {
         role: 'system',
-        content: '你是一名面向企业客户的风险探测报告助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。报告必须正式、客观，并给出企业侧可执行的漏洞解决方案。必须包含：1. 面向管理层的执行摘要 2. 当前阶段与进展 3. 已确认风险/异常 4. 对企业的分级修复建议（立即/24小时内/一周内/长期）5. 未完成项与下一步建议。不要虚构不存在的结果，不要输出内部调试口吻。',
+        content: '你是一名面向企业客户的渗透测试报告助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。报告必须正式、客观，并给出企业侧可执行的漏洞解决方案。必须包含：1. 面向管理层的执行摘要 2. 当前阶段与进展 3. 已确认风险/异常 4. 对企业的分级修复建议（立即/24小时内/一周内/长期）5. 未完成项与下一步建议。不要虚构不存在的结果，不要输出内部调试口吻。',
       },
       {
         role: 'user',
@@ -2368,8 +2368,28 @@ ${recentLogs || '暂无执行日志'}
       },
     ]);
 
+    const aiUsage = aiService.getLastUsage();
+    if (aiUsage && aiUsage.total_tokens > 0) {
+      try {
+        await pythonApi.pentestRecordTokenUsage({
+          task_id: taskId,
+          category: 'report_ai',
+          prompt_tokens: aiUsage.prompt_tokens,
+          completion_tokens: aiUsage.completion_tokens,
+          total_tokens: aiUsage.total_tokens,
+          model: aiService.getConfig()?.model || '',
+          provider: aiService.getConfig()?.provider || '',
+        });
+      } catch (error) {
+        console.warn('写入 report_ai token_usage 失败:', error);
+      }
+    }
+    const reportWithUsage = aiUsage && aiUsage.total_tokens > 0
+      ? `${report?.trim() || fallbackReport}\n\n## Token 消耗统计\n\n- AI 解析报告: prompt ${aiUsage.prompt_tokens} / completion ${aiUsage.completion_tokens} / total ${aiUsage.total_tokens}\n`
+      : (report?.trim() || fallbackReport);
+
     return {
-      report: report?.trim() || fallbackReport,
+      report: reportWithUsage,
       phase,
       findingsCount,
       vulnCount,
@@ -2493,7 +2513,7 @@ async function restoreRunningPentestTask() {
           actions: status.actions,
         },
         error: '',
-        executionMode: 'parallel',
+        executionMode: 'serial',
         startedAt: Date.now(),
       };
       pentestTasks.value = [...pentestTasks.value, newTask];

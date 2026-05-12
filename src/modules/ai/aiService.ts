@@ -1,5 +1,7 @@
 import {
   streamAIProxyMessages,
+  getLastAIUsage,
+  type AIUsageSummary,
   type AIChatMessage,
   type AIProviderConfig,
   type AIProviderKind,
@@ -217,6 +219,10 @@ export class AIService {
   clearConfig(): void {
     this.config = null
     localStorage.removeItem(STORAGE_KEY)
+  }
+
+  getLastUsage(): AIUsageSummary | null {
+    return getLastAIUsage()
   }
 
   isConfigured(): boolean {

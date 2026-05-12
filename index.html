@@ -6,7 +6,7 @@
   <link rel="icon" type="image/png" href="/logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>安御智测</title>
-  <meta name="description" content="Linux应急响应工具，支持SSH连接、终端操作、文件管理和Docker容器管理" />
+  <meta name="description" content="Linux应急响应工具，支持SSH连接、终端操作、文件管理" />
 
   <style>
     /* 防止页面闪烁的基础样式 */
@@ -208,7 +208,7 @@
       </div>
       <div class="loading-progress-value" id="initial-loading-percent">0%</div>
       <div class="loading-text primary" id="initial-loading-text">正在加载前端资源...</div>
-      <div class="loading-text" id="backend-status">请确保Python后端服务已启动</div>
+      <div class="loading-text" id="backend-status">请确保后端服务已启动</div>
     </div>
   </div>
 
@@ -224,8 +224,8 @@
       const startedAt = Date.now();
       const expectedMs = 8500;
       const steps = [
-        '正在加载前端资源...',
-        '正在导入核心 JS 模块，请稍候...',
+        '正在加载资源...',
+        '正在导入核心模块，请稍候...',
         '正在初始化界面与交互组件...',
         '正在准备连接管理器...',
         '即将进入工作台...'
@@ -263,15 +263,15 @@
         const data = await response.json();
 
         if (data.status === 'ok') {
-          document.getElementById('backend-status').textContent = 'Python后端连接成功';
+          document.getElementById('backend-status').textContent = '服务启动成功';
           document.getElementById('backend-status').style.color = '#4cc9f0';
         } else {
-          document.getElementById('backend-status').textContent = '警告：Python后端连接失败';
+          document.getElementById('backend-status').textContent = '警告：服务启动失败';
           document.getElementById('backend-status').style.color = '#fca5a5';
         }
       } catch (error) {
         console.error('无法连接到Python后端:', error);
-        document.getElementById('backend-status').textContent = '错误：无法连接到Python后端';
+        document.getElementById('backend-status').textContent = '错误：无法连接到服务';
         document.getElementById('backend-status').style.color = '#fca5a5';
       }
     })();

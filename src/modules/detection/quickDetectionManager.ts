@@ -1366,7 +1366,9 @@ export class QuickDetectionManager {
       return;
     }
 
-    listEl.innerHTML = this.detectionHistory.map(report => `
+    listEl.innerHTML = this.detectionHistory.map(report => {
+      const uniqueItemCount = new Set((report.items || []).map(item => item.id)).size;
+      return `
       <div class="history-item" style="
         display: flex;
         justify-content: space-between;
@@ -1385,7 +1387,7 @@ export class QuickDetectionManager {
             ${new Date(report.timestamp).toLocaleString('zh-CN')}
           </div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-            ${report.server} · ${report.items.length} 项检测 · ${(report.totalDuration / 1000).toFixed(1)}s
+            ${report.server} · ${uniqueItemCount} 项检测 · ${(report.totalDuration / 1000).toFixed(1)}s
           </div>
         </div>
         <div style="text-align: right;">
@@ -1397,7 +1399,8 @@ export class QuickDetectionManager {
           </div>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   /**
@@ -1492,16 +1495,17 @@ export class QuickDetectionManager {
           height: 100%;
           background: rgba(0, 0, 0, 0.5);
         "></div>
-        <div class="modal-content" style="
+        <div class="modal-content detection-report-modal-content" style="
           position: relative;
           max-width: 1000px;
           width: 90%;
           max-height: 90vh;
           overflow-y: auto;
+          scrollbar-gutter: stable;
           background: var(--bg-primary);
-          border-radius: var(--border-radius-lg);
-          padding: var(--spacing-lg);
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          border-radius: 18px;
+          padding: var(--spacing-lg) calc(var(--spacing-lg) + 10px) var(--spacing-lg) var(--spacing-lg);
+          box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22);
         ">
           <!-- 报告头部 -->
           <div style="
@@ -1612,7 +1616,7 @@ export class QuickDetectionManager {
             border-top: 1px solid var(--border-color);
           ">
             <button class="modern-btn secondary" onclick="window.quickDetection?.interpretReport()">
-              🤖 AI 解析报告
+              AI 解析报告
             </button>
             <button class="modern-btn secondary" onclick="window.quickDetection?.exportReport()">
               📄 导出报告
@@ -1811,7 +1815,6 @@ export class QuickDetectionManager {
                   class="modern-btn secondary"
                   style="margin-top: 8px; font-size: 11px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px;"
                   onclick="window.quickDetection?.generateAISolutionStream('${finding.title.replace(/'/g, "\\'")}', '${finding.description.replace(/'/g, "\\'")}', '${finding.severity}', '${uniqueContainerId}')">
-                  ${Robot({ theme: 'outline', size: '12', fill: 'currentColor' })}
                   <span>AI 生成解决方案</span>
                 </button>
               </div>
@@ -2134,7 +2137,6 @@ export class QuickDetectionManager {
             z-index: 10;
           `;
           detailedBtn.innerHTML = `
-            ${Robot({ theme: 'outline', size: '12', fill: 'currentColor' })}
             <span>不满意? 点我生成详细方案</span>
           `;
           detailedBtn.onclick = () => {
@@ -3054,15 +3056,6 @@ ${problemsText}
             font-size: 14px;
             cursor: pointer;
           ">复制解析</button>
-          <button onclick="window.quickDetection?.autoFixRisks()" style="
-            padding: 8px 16px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            color: var(--text-primary);
-            font-size: 14px;
-            cursor: pointer;
-          ">🔧 AI 自动修复</button>
           <button onclick="this.closest('div[style*=fixed]').remove()" style="
             padding: 8px 16px;
             background: var(--accent-color);
@@ -3910,10 +3903,10 @@ ${errorOutput}
    */
   private getAllCheckIds(): string[] {
     const checkboxes = document.querySelectorAll('.detection-item input[type="checkbox"]:checked');
-    return Array.from(checkboxes).map(cb => {
+    return Array.from(new Set(Array.from(checkboxes).map(cb => {
       const parent = cb.closest('.detection-item');
       return parent?.getAttribute('data-check-id') || '';
-    }).filter(id => id !== '');
+    }).filter(id => id !== '')));
   }
 
   /**

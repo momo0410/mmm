@@ -479,7 +479,7 @@ class PythonApi {
       target: params.target,
       max_rounds: params.max_rounds ?? 30,
       dry_run: params.dry_run ?? false,
-      execution_mode: params.execution_mode ?? 'parallel',
+      execution_mode: params.execution_mode ?? 'serial',
       skill_query: params.skill_query ?? '',
       skill_limit: params.skill_limit ?? 5,
       llm_max_tokens: params.llm_max_tokens ?? 600,
@@ -535,7 +535,32 @@ class PythonApi {
   }
 
   async pentestGetReport(taskId: string) {
-    return this.request<{report: string; phase: string; task_id: string}>('GET', '/agent/report', undefined, { task_id: taskId });
+    return this.request<{report: string; phase: string; task_id: string; token_usage?: Record<string, any>}>('GET', '/agent/report', undefined, { task_id: taskId });
+  }
+
+  async pentestRecordTokenUsage(params: {
+    task_id: string;
+    category: string;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    model?: string;
+    provider?: string;
+  }) {
+    return this.request<{
+      success: boolean;
+      task_id: string;
+      category: string;
+      token_usage?: Record<string, any>;
+    }>('POST', '/agent/token-usage', {
+      task_id: params.task_id,
+      category: params.category,
+      prompt_tokens: params.prompt_tokens,
+      completion_tokens: params.completion_tokens,
+      total_tokens: params.total_tokens,
+      model: params.model ?? '',
+      provider: params.provider ?? '',
+    });
   }
 
   async pentestLogs(taskId: string) {

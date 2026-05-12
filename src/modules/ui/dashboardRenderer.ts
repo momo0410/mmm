@@ -78,7 +78,7 @@ export class DashboardRenderer {
           <div class="dash-v3-header-left">
             <div class="dash-v3-logo">${DashboardIcon({ theme: 'filled', size: '22', fill: 'currentColor' })}</div>
             <div class="dash-v3-title-group">
-              <h2 class="dash-v3-title">系统监控仪表盘</h2>
+              <h2 class="dash-v3-title">系统监控</h2>
               <span id="dashboard-last-update" class="dash-v3-subtitle">最后更新: ${this.formatTime(systemInfo.lastUpdate)}</span>
             </div>
             <div class="dash-v3-system-status">
@@ -340,23 +340,8 @@ export class DashboardRenderer {
     
     const coords = coordArray.map(c => `${c.x},${c.y}`);
     const linePath = `M${coords.join(' L')}`;
-    
-    const dataPoints = coordArray.map((c, i) => {
-      const timeAgo = (displayPoints.length - 1 - i) * 5;
-      return `
-        <circle 
-          cx="${c.x}" cy="${c.y}" r="2" 
-          fill="${color}" stroke="white" stroke-width="0.5"
-          class="net-chart-point"
-          data-value="${c.value.toFixed(1)}"
-          data-unit="${unit}"
-          data-time="${timeAgo === 0 ? '现在' : `-${timeAgo}s`}"
-          style="cursor: pointer;"
-        />
-      `;
-    }).join('');
-    
-    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;overflow:visible;"><path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>${dataPoints}</svg>`;
+
+    return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;overflow:visible;"><path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
   private renderLineChartWithGrid(points: number[], color: string, chartId: string): string {
@@ -395,20 +380,6 @@ export class DashboardRenderer {
       return `<line x1="${x}" y1="${padding}" x2="${x}" y2="${height - padding}" stroke="rgba(148,163,184,0.12)" stroke-width="1"/>`;
     }).join('');
 
-    const dataPoints = coordArray.map((c, i) => {
-      const timeAgo = (pointCount - 1 - i) * 5;
-      return `
-        <circle 
-          cx="${c.x}" cy="${c.y}" r="4" 
-          fill="${color}" stroke="white" stroke-width="2" 
-          class="chart-data-point"
-          data-value="${c.value.toFixed(1)}"
-          data-time="${timeAgo === 0 ? '现在' : `-${timeAgo}s`}"
-          style="cursor: pointer;"
-        />
-      `;
-    }).join('');
-
     return `
       <div class="dash-v3-line-chart-wrap" id="${chartId}">
         <div class="dash-v3-chart-y-labels">
@@ -426,7 +397,6 @@ export class DashboardRenderer {
             ${horizontalLines}
             <path d="${areaPath}" fill="url(#area-${color.replace('#','')})"/>
             <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            ${dataPoints}
           </svg>
           <div class="chart-tooltip" style="display: none; position: absolute; background: rgba(0,0,0,0.8); color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 100; white-space: nowrap;">
             <div class="tooltip-value"></div>

@@ -50,7 +50,7 @@ export interface NavigationItem {
 const ALL_NAV_ITEMS: NavigationItem[] = [
   {
     id: 'dashboard',
-    title: '仪表板',
+    title: '系统监控',
     description: '查看服务器实时状态概览',
     iconKey: 'Dashboard',
     visibleInModes: ['classic']

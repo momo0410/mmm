@@ -176,7 +176,6 @@ export class SDITApp {
       const hideSidebar = this.modernUIRenderer.shouldHideSidebar();
       app.innerHTML = `
         <div class="app-layout">
-          ${this.modernUIRenderer.renderTitleBar()}
           <div class="main-container">
             ${hideSidebar ? '' : this.modernUIRenderer.renderSidebar()}
             ${this.modernUIRenderer.renderMainWorkspace()}

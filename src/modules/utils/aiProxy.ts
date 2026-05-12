@@ -31,9 +31,17 @@ export interface AIChatMessage {
   content: string
 }
 
+export interface AIUsageSummary {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
 const PYTHON_API_BASE_URL = import.meta.env.DEV
   ? '/api/v1'
   : 'http://127.0.0.1:3001/api/v1'
+
+let lastAIUsage: AIUsageSummary | null = null
 
 function escapeHtml(text: string): string {
   return text
@@ -176,6 +184,27 @@ function buildRequestBody(
     temperature,
     max_tokens: maxTokens,
     stream,
+    stream_options: stream ? { include_usage: true } : undefined,
+  }
+}
+
+function normalizeUsage(raw: any): AIUsageSummary | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const prompt = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0
+  const completion = Number(raw.completion_tokens ?? raw.output_tokens ?? 0) || 0
+  const total = Number(raw.total_tokens ?? (prompt + completion)) || 0
+
+  if (prompt <= 0 && completion <= 0 && total <= 0) {
+    return null
+  }
+
+  return {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: total,
   }
 }
 
@@ -256,6 +285,10 @@ function flushStreamBuffer(
 
     try {
       const payload = JSON.parse(payloadText)
+      const usage = normalizeUsage(payload?.usage)
+      if (usage) {
+        lastAIUsage = usage
+      }
       const text = extractTextFromPayload(payload, provider)
       if (!text) {
         continue
@@ -276,6 +309,7 @@ export async function streamAIProxyMessages(
   onChunk?: (chunk: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
+  lastAIUsage = null
   const provider = normalizeProvider(config)
   const response = await fetch(`${PYTHON_API_BASE_URL}/ai/chat-proxy`, {
     method: 'POST',
@@ -322,6 +356,10 @@ export async function streamAIProxyMessages(
   }
 
   return fullText
+}
+
+export function getLastAIUsage(): AIUsageSummary | null {
+  return lastAIUsage
 }
 
 export async function callAIAnalysisViaProxyStream(

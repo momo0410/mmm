@@ -3,6 +3,12 @@ import type { AppPage } from '../pageTypes';
 export function renderWorkspaceShell(content: string): string {
   return `
     <div class="main-workspace">
+      <div class="workspace-brand" aria-label="安御智测">
+        <div class="workspace-brand-logo">
+          <img src="/logo.png" alt="安御智测 Logo" />
+        </div>
+        <div class="workspace-brand-name">安御智测</div>
+      </div>
       <div class="workspace-content page-transition" id="workspace-content">
         ${content}
       </div>
