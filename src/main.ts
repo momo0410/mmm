@@ -1746,14 +1746,21 @@ function setupGlobalModalFunctions(app: SDITApp) {
       const res = await fetch(`${base}/knowledge-base`);
       const data = await res.json();
       const items = data.items || [];
+      const escapeHtml = (value: unknown) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
       let html = '';
       for (const item of items) {
+        const secondaryText = item.source_path || item.description || item.filename;
         html += `
           <div class="kb-item" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; background: var(--bg-secondary);">
-            <input type="checkbox" class="kb-checkbox" data-filename="${item.filename}" style="accent-color: var(--accent-color);">
+            <input type="checkbox" class="kb-checkbox" data-filename="${escapeHtml(item.filename)}" style="accent-color: var(--accent-color);">
             <div style="flex: 1; min-width: 0;">
-              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${item.name}</div>
-              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.description || item.filename}</div>
+              <div style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${escapeHtml(item.name)}</div>
+              <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(secondaryText)}">${escapeHtml(secondaryText)}</div>
             </div>
           </div>
         `;
@@ -1782,6 +1789,45 @@ function setupGlobalModalFunctions(app: SDITApp) {
     }
     await (window as any).refreshKnowledgeBaseList?.();
     (window as any).showNotification?.('删除成功', 'success');
+  };
+
+  // 从本地文件导入知识库条目
+  (window as any).importKnowledgeBaseFromLocalFiles = async () => {
+    try {
+      const selected = await openDialog({
+        multiple: true,
+        filters: [{
+          name: '文本与文档',
+          extensions: ['txt', 'md', 'json', 'yaml', 'yml', 'csv', 'log', 'ini', 'conf']
+        }]
+      });
+
+      const paths = Array.isArray(selected)
+        ? selected.filter(Boolean)
+        : selected
+          ? [selected]
+          : [];
+      if (paths.length === 0) return;
+
+      const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
+      const res = await fetch(`${base}/knowledge-base/import-local`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+      });
+
+      if (res.ok) {
+        const payload = await res.json();
+        await (window as any).refreshKnowledgeBaseList?.();
+        (window as any).showNotification?.(payload.message || '导入成功', 'success');
+      } else {
+        const err = await res.json();
+        (window as any).showNotification?.(err.detail || '导入失败', 'error');
+      }
+    } catch (error) {
+      console.error('导入本地知识库文件失败:', error);
+      (window as any).showNotification?.('导入失败', 'error');
+    }
   };
 
   // 增加知识库条目提示

@@ -1948,6 +1948,7 @@ async def list_knowledge_base():
                     "name": data.get("name", fname),
                     "filename": fname,
                     "description": data.get("description", ""),
+                    "source_path": data.get("source_path", ""),
                     "content_preview": json.dumps(data)[:200],
                 })
             except Exception:
@@ -1955,6 +1956,7 @@ async def list_knowledge_base():
                     "name": fname,
                     "filename": fname,
                     "description": "",
+                    "source_path": "",
                     "content_preview": "",
                 })
     return {"items": result}
@@ -1976,13 +1978,34 @@ class KnowledgeBaseCreateRequest(BaseModel):
     description: str = ""
     content: str = ""
 
+
+class KnowledgeBaseImportRequest(BaseModel):
+    paths: List[str] = Field(default_factory=list)
+
+
+def _safe_kb_filename(name: str) -> str:
+    safe_name = "".join(c for c in str(name or "") if c.isalnum() or c in "-_ ").strip()
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
+    return safe_name
+
+
+def _read_local_text_file(path: str) -> str:
+    try_encodings = ("utf-8", "utf-8-sig", "gb18030", "gbk")
+    with open(path, "rb") as f:
+        raw = f.read()
+    for encoding in try_encodings:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise HTTPException(status_code=400, detail=f"文件无法按文本读取: {os.path.basename(path)}")
+
 @router.post("/knowledge-base")
 async def create_knowledge_base(req: KnowledgeBaseCreateRequest):
     """创建知识库条目"""
     _ensure_kb_dir()
-    safe_name = "".join(c for c in req.name if c.isalnum() or c in "-_ ").strip()
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="名称不能为空")
+    safe_name = _safe_kb_filename(req.name)
     filename = f"{safe_name}.json"
     fpath = os.path.join(_KNOWLEDGE_BASE_ROOT, filename)
     data = {
@@ -1994,3 +2017,56 @@ async def create_knowledge_base(req: KnowledgeBaseCreateRequest):
     with open(fpath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     return {"success": True, "message": "创建成功", "filename": filename}
+
+
+@router.post("/knowledge-base/import-local")
+async def import_local_knowledge_base(req: KnowledgeBaseImportRequest):
+    """从本机文件导入知识库条目"""
+    _ensure_kb_dir()
+    paths = [str(path or "").strip() for path in req.paths if str(path or "").strip()]
+    if not paths:
+        raise HTTPException(status_code=400, detail="请先选择要导入的本地文件")
+
+    imported = []
+    for path in paths:
+        normalized = os.path.abspath(os.path.normpath(path))
+        if not os.path.exists(normalized):
+            raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+        if not os.path.isfile(normalized):
+            raise HTTPException(status_code=400, detail=f"仅支持导入文件: {path}")
+
+        file_size = os.path.getsize(normalized)
+        if file_size > 2 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"文件过大，单文件限制 2MB: {os.path.basename(path)}")
+
+        content = _read_local_text_file(normalized)
+        base_name = os.path.splitext(os.path.basename(normalized))[0]
+        safe_name = _safe_kb_filename(base_name)
+        filename = f"{safe_name}.json"
+        fpath = os.path.join(_KNOWLEDGE_BASE_ROOT, filename)
+        suffix = 2
+        while os.path.exists(fpath):
+            filename = f"{safe_name}-{suffix}.json"
+            fpath = os.path.join(_KNOWLEDGE_BASE_ROOT, filename)
+            suffix += 1
+
+        data = {
+            "name": base_name,
+            "description": f"导入自本地文件: {normalized}",
+            "content": content,
+            "source_path": normalized,
+            "created_at": str(datetime.now()),
+        }
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        imported.append({
+            "name": base_name,
+            "filename": filename,
+            "source_path": normalized,
+        })
+
+    return {
+        "success": True,
+        "message": f"成功导入 {len(imported)} 个本地文件",
+        "items": imported,
+    }

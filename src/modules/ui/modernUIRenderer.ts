@@ -1940,6 +1940,7 @@ export class ModernUIRenderer {
 
           <div style="padding: 12px 20px; display: flex; gap: 10px; border-bottom: 1px solid var(--border-color-light);">
             <button class="modern-btn danger" style="font-size: 12px; padding: 6px 12px;" onclick="window.deleteSelectedKnowledgeBase()">删除</button>
+            <button class="modern-btn secondary" style="font-size: 12px; padding: 6px 12px;" onclick="window.importKnowledgeBaseFromLocalFiles()">导入文件</button>
             <button class="modern-btn primary" style="font-size: 12px; padding: 6px 12px;" onclick="window.addKnowledgeBasePrompt()">增加</button>
           </div>
 
