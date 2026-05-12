@@ -377,6 +377,29 @@
                   发现资产 {{ agentResult.findings_count || 0 }} 项，
                   发现漏洞 {{ agentResult.vuln_count || 0 }} 项。
                 </p>
+                <div class="payloader-agent-live-stats payloader-agent-live-stats--summary">
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">当前阶段</span>
+                    <span class="payloader-agent-live-value">{{ getPhaseLabel(agentResult.final?.phase || agentResult.phase) }}</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">任务轮次</span>
+                    <span class="payloader-agent-live-value">{{ agentRoundCount || 0 }} 轮</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">资产发现</span>
+                    <span class="payloader-agent-live-value">{{ agentResult.findings_count || 0 }} 项</span>
+                  </div>
+                  <div class="payloader-agent-live-stat">
+                    <span class="payloader-agent-live-label">漏洞发现</span>
+                    <span class="payloader-agent-live-value">{{ agentResult.vuln_count || 0 }} 项</span>
+                  </div>
+                  <div class="payloader-agent-live-stat payloader-agent-live-stat--token">
+                    <span class="payloader-agent-live-label">Token 消耗</span>
+                    <span class="payloader-agent-live-value">{{ currentTokenUsageDisplay }}</span>
+                    <span class="payloader-agent-live-meta">{{ currentTokenUsageMeta }}</span>
+                  </div>
+                </div>
               </div>
 
               <div v-if="agentResult.actions && agentResult.actions.length > 0" class="payloader-agent-section payloader-agent-live-log-section">
@@ -4181,6 +4204,10 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
+}
+
+.payloader-agent-live-stats--summary {
+  margin-top: 16px;
 }
 
 .payloader-agent-live-stat {
