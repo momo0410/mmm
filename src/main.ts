@@ -1791,68 +1791,46 @@ function setupGlobalModalFunctions(app: SDITApp) {
     (window as any).showNotification?.('删除成功', 'success');
   };
 
-  // 从本地文件导入知识库条目
-  (window as any).importKnowledgeBaseFromLocalFiles = async () => {
-    try {
-      const selected = await openDialog({
-        multiple: true,
-        filters: [{
-          name: '文本与文档',
-          extensions: ['txt', 'md', 'json', 'yaml', 'yml', 'csv', 'log', 'ini', 'conf']
-        }]
-      });
+  // 增加知识库条目：直接打开文件选择器导入本地文件
+  (window as any).addKnowledgeBasePrompt = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.txt,.md,.json,.yaml,.yml,.csv,.log,.ini,.conf,text/plain,application/json';
+    input.style.display = 'none';
 
-      const paths = Array.isArray(selected)
-        ? selected.filter(Boolean)
-        : selected
-          ? [selected]
-          : [];
-      if (paths.length === 0) return;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      input.remove();
+      if (files.length === 0) return;
+
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append('files', file);
+      }
 
       const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
-      const res = await fetch(`${base}/knowledge-base/import-local`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      });
-
-      if (res.ok) {
-        const payload = await res.json();
-        await (window as any).refreshKnowledgeBaseList?.();
-        (window as any).showNotification?.(payload.message || '导入成功', 'success');
-      } else {
-        const err = await res.json();
-        (window as any).showNotification?.(err.detail || '导入失败', 'error');
+      try {
+        const res = await fetch(`${base}/knowledge-base/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (res.ok) {
+          const payload = await res.json();
+          await (window as any).refreshKnowledgeBaseList?.();
+          (window as any).showNotification?.(payload.message || '导入成功', 'success');
+        } else {
+          const err = await res.json();
+          (window as any).showNotification?.(err.detail || '导入失败', 'error');
+        }
+      } catch (error) {
+        console.error('上传知识库文件失败:', error);
+        (window as any).showNotification?.('导入失败', 'error');
       }
-    } catch (error) {
-      console.error('导入本地知识库文件失败:', error);
-      (window as any).showNotification?.('导入失败', 'error');
-    }
-  };
+    };
 
-  // 增加知识库条目提示
-  (window as any).addKnowledgeBasePrompt = async () => {
-    const name = prompt('请输入知识库条目名称:');
-    if (!name) return;
-    const description = prompt('请输入描述:', '');
-    const content = prompt('请输入内容:', '');
-    const base = import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:3001/api/v1';
-    try {
-      const res = await fetch(`${base}/knowledge-base`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description: description || '', content: content || '' }),
-      });
-      if (res.ok) {
-        await (window as any).refreshKnowledgeBaseList?.();
-        (window as any).showNotification?.('添加成功', 'success');
-      } else {
-        const err = await res.json();
-        (window as any).showNotification?.(err.detail || '添加失败', 'error');
-      }
-    } catch (e) {
-      (window as any).showNotification?.('添加失败', 'error');
-    }
+    document.body.appendChild(input);
+    input.click();
   };
 
   // 显示添加服务器表单

@@ -2035,10 +2035,6 @@ async def import_local_knowledge_base(req: KnowledgeBaseImportRequest):
         if not os.path.isfile(normalized):
             raise HTTPException(status_code=400, detail=f"仅支持导入文件: {path}")
 
-        file_size = os.path.getsize(normalized)
-        if file_size > 2 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail=f"文件过大，单文件限制 2MB: {os.path.basename(path)}")
-
         content = _read_local_text_file(normalized)
         base_name = os.path.splitext(os.path.basename(normalized))[0]
         safe_name = _safe_kb_filename(base_name)
@@ -2063,6 +2059,60 @@ async def import_local_knowledge_base(req: KnowledgeBaseImportRequest):
             "name": base_name,
             "filename": filename,
             "source_path": normalized,
+        })
+
+    return {
+        "success": True,
+        "message": f"成功导入 {len(imported)} 个本地文件",
+        "items": imported,
+    }
+
+
+@router.post("/knowledge-base/upload")
+async def upload_knowledge_base_files(files: List[UploadFile] = File(...)):
+    """从浏览器选择的本地文件上传并导入知识库"""
+    _ensure_kb_dir()
+    if not files:
+        raise HTTPException(status_code=400, detail="请先选择要导入的本地文件")
+
+    imported = []
+    for upload in files:
+        original_name = str(upload.filename or "").strip() or "untitled.txt"
+        raw = await upload.read()
+
+        content = None
+        for encoding in ("utf-8", "utf-8-sig", "gb18030", "gbk"):
+            try:
+                content = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if content is None:
+            raise HTTPException(status_code=400, detail=f"文件无法按文本读取: {original_name}")
+
+        base_name = os.path.splitext(os.path.basename(original_name))[0]
+        safe_name = _safe_kb_filename(base_name)
+        filename = f"{safe_name}.json"
+        fpath = os.path.join(_KNOWLEDGE_BASE_ROOT, filename)
+        suffix = 2
+        while os.path.exists(fpath):
+            filename = f"{safe_name}-{suffix}.json"
+            fpath = os.path.join(_KNOWLEDGE_BASE_ROOT, filename)
+            suffix += 1
+
+        data = {
+            "name": base_name,
+            "description": f"导入自本地文件: {original_name}",
+            "content": content,
+            "source_path": original_name,
+            "created_at": str(datetime.now()),
+        }
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        imported.append({
+            "name": base_name,
+            "filename": filename,
+            "source_path": original_name,
         })
 
     return {
