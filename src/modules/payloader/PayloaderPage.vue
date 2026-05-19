@@ -591,7 +591,7 @@
               </div>
 
               <!-- 检测报告 -->
-              <div v-if="agentResult.final?.report" class="payloader-agent-section payloader-agent-report-section">
+              <div v-if="agentReportView" class="payloader-agent-section payloader-agent-report-section payloader-agent-report-section--dashboard">
                 <h4 class="payloader-agent-section-title">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -602,7 +602,12 @@
                   </svg>
                   完整渗透测试报告
                 </h4>
-                <div class="payloader-agent-report-content" v-html="renderReportMarkdown(agentResult.final.report)"></div>
+                <PentestReportDashboard
+                  :view="agentReportView"
+                  :html="agentReportHtml"
+                  :context="agentReportContext"
+                  :show-refresh="false"
+                />
               </div>
 
               <!-- 使用的 Skills -->
@@ -657,19 +662,16 @@
           <div class="payloader-modal payloader-modal--log">
           <div class="payloader-modal-header">
             <div class="payloader-log-header-main">
-              <h3>任务日志 ({{ logRounds.length }} 轮 / {{ logData.length }} 条任务)</h3>
-              <p v-if="currentLogTaskId" class="payloader-log-header-sub">
-                任务 {{ currentLogTaskId }} · 当前阶段 {{ getPhaseLabel(logPhase) }}
-              </p>
+              <h3>任务日志</h3>
             </div>
             <div class="payloader-modal-header-actions">
               <button
-                v-if="currentLogTaskId"
-                class="payloader-modal-header-btn"
-                :disabled="logLoading"
-                @click="loadLogs(currentLogTaskId)"
+                v-if="logData.length > 0"
+                class="payloader-modal-header-btn payloader-log-report-action"
+                type="button"
+                @click="scrollLogDetailsIntoView"
               >
-                刷新
+                查看轮次详情
               </button>
               <button class="payloader-modal-close" @click="closeLogModal">&times;</button>
             </div>
@@ -678,27 +680,21 @@
             <div v-if="logLoading && logData.length === 0" class="payloader-log-empty">正在加载日志...</div>
             <div v-else-if="logError" class="payloader-log-empty payloader-log-empty--error">{{ logError }}</div>
             <template v-else>
-              <section v-if="logReport" class="payloader-log-report-section">
-                <div class="payloader-log-report-header">
-                  <div>
-                    <div class="payloader-log-report-eyebrow">渗透测试报告</div>
-                    <h4>本次渗透测试总结</h4>
-                  </div>
-                  <button
-                    v-if="logData.length > 0"
-                    class="payloader-modal-header-btn payloader-log-report-action"
-                    type="button"
-                    @click="scrollLogDetailsIntoView"
-                  >
-                    查看轮次详情
-                  </button>
-                </div>
-                <div class="payloader-agent-report-content" v-html="renderReportMarkdown(logReport)"></div>
+              <section class="payloader-log-report-section payloader-log-report-section--dashboard">
+                <PentestReportDashboard
+                  :view="logReportView"
+                  :html="renderedLogReportHtml"
+                  :context="logReportContext"
+                  :refreshing="logLoading"
+                  @refresh="loadLogs(currentLogTaskId)"
+                />
               </section>
               <div v-if="logData.length === 0" class="payloader-log-empty">
               {{ agentRunning ? 'AI 已决策，正在等待第一条执行日志落盘...' : '暂无日志数据' }}
               </div>
-              <div v-else :class="['payloader-log-layout', { 'payloader-log-layout--with-terminal': !!selectedLogAction }]">
+              <div v-else ref="logDetailsSectionRef" class="payloader-log-details-section">
+                <div class="payloader-log-details-title">轮次执行详情</div>
+                <div :class="['payloader-log-layout', { 'payloader-log-layout--with-terminal': !!selectedLogAction }]">
                 <div class="payloader-log-rounds">
                   <div v-if="!selectedLogAction" class="payloader-log-terminal-inline-hint">
                     右侧实时终端过程默认收起。点击某条任务的“查看实时终端过程”后再展开显示。
@@ -846,6 +842,7 @@
                     <pre class="payloader-log-terminal-output">{{ getTerminalPanelOutput(selectedLogAction) || '[当前尚无终端输出]' }}</pre>
                   </div>
                 </aside>
+                </div>
               </div>
             </template>
           </div>
@@ -1170,6 +1167,11 @@
   import PayloaderToolbar from './components/PayloaderToolbar.vue';
 import PayloaderContent from './components/PayloaderContent.vue';
 import EncodingTools from './components/EncodingTools.vue';
+import PentestReportDashboard from './components/PentestReportDashboard.vue';
+import {
+  resolveReportView,
+  type PentestReportView,
+} from './pentestReportView';
 import { usePayloader } from './composables/usePayloaderState';
 import type { PayloadItem, ToolCommand, I18nText } from './types';
 import { aiService } from '../ai/aiService';
@@ -1515,7 +1517,7 @@ async function interruptTaskAndClose() {
     updateTaskResult(task.id, {
       status: 'failed',
       final: {
-        report: '# 正在生成阶段性总结报告...\n\n任务已中断，正在根据当前阶段已获取的信息整理总结，请稍候。',
+        report: '<h1>正在生成阶段性总结报告</h1><p>任务已中断，正在根据当前阶段已获取的信息整理总结，请稍候。</p>',
         phase: task.phase,
       },
       phase: task.phase,
@@ -1528,6 +1530,7 @@ async function interruptTaskAndClose() {
       status: 'failed',
       final: {
         report: summary.report,
+        view: summary.view,
         phase: summary.phase,
       },
       phase: summary.phase,
@@ -1923,13 +1926,61 @@ function escapeReportHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatReportInline(text: string) {
   return escapeReportHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function reportH1(title: string) {
+  return `<h1>${escapeReportHtml(title)}</h1>`;
+}
+
+function reportH2(title: string) {
+  return `<h2>${escapeReportHtml(title)}</h2>`;
+}
+
+function reportH3(title: string) {
+  return `<h3>${escapeReportHtml(title)}</h3>`;
+}
+
+function reportP(text: string) {
+  return `<p>${formatReportInline(text)}</p>`;
+}
+
+function reportLiHtml(html: string) {
+  return `<li>${html}</li>`;
+}
+
+function reportUl(items: string[]) {
+  if (!items.length) {
+    return '<ul><li>暂无。</li></ul>';
+  }
+  return `<ul>${items.join('')}</ul>`;
+}
+
+function reportOl(items: string[]) {
+  if (!items.length) {
+    return '<ol><li>暂无。</li></ol>';
+  }
+  return `<ol>${items.join('')}</ol>`;
+}
+
+function reportStrongLi(label: string, value: string) {
+  return reportLiHtml(`<strong>${escapeReportHtml(label)}：</strong> ${formatReportInline(value)}`);
+}
+
+function buildReportListItemHtml(label: string, value: unknown, fallback: string, maxLength = 140) {
+  return reportStrongLi(label, summarizeReportValue(value, fallback, maxLength));
+}
+
+function reportOlText(items: string[]) {
+  return reportOl(items.map((item) => reportLiHtml(formatReportInline(item))));
 }
 
 function summarizeReportValue(value: unknown, fallback: string, maxLength = 120) {
@@ -1987,19 +2038,178 @@ function summarizeReportValue(value: unknown, fallback: string, maxLength = 120)
   return `${summary.slice(0, maxLength).trimEnd()}...`;
 }
 
-function buildReportListItem(label: string, value: unknown, fallback: string, maxLength = 140) {
-  return `- **${label}**：${summarizeReportValue(value, fallback, maxLength)}`;
+const REPORT_ALLOWED_TAGS = new Set([
+  'article', 'section', 'div', 'span', 'p', 'br', 'hr',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'strong', 'em', 'b', 'i', 'u',
+  'ul', 'ol', 'li',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'pre', 'code', 'blockquote',
+  'a',
+]);
+const REPORT_BLOCKED_TAGS = new Set([
+  'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base',
+  'form', 'input', 'button', 'textarea', 'select', 'option', 'svg', 'math',
+]);
+const REPORT_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
+  a: new Set(['href', 'target', 'rel']),
+  code: new Set(['class']),
+};
+
+function isLikelyHtmlReport(content: string) {
+  return /<\s*(article|section|div|span|p|br|hr|h1|h2|h3|h4|h5|h6|strong|em|ul|ol|li|table|thead|tbody|tr|th|td|pre|code|blockquote|a)\b/i.test(content);
 }
 
-function renderReportMarkdown(md: string): string {
+function sanitizeReportHtml(html: string): string {
+  const normalized = String(html || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  if (typeof DOMParser === 'undefined') {
+    return escapeReportHtml(normalized).replace(/\n/g, '<br>');
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(normalized, 'text/html');
+
+  const sanitizeNode = (parent: Node) => {
+    for (const child of Array.from(parent.childNodes)) {
+      if (child.nodeType === Node.COMMENT_NODE) {
+        child.parentNode?.removeChild(child);
+        continue;
+      }
+
+      if (child.nodeType !== Node.ELEMENT_NODE) {
+        continue;
+      }
+
+      const element = child as HTMLElement;
+      const tag = element.tagName.toLowerCase();
+
+      if (REPORT_BLOCKED_TAGS.has(tag)) {
+        element.remove();
+        continue;
+      }
+
+      sanitizeNode(element);
+
+      if (!REPORT_ALLOWED_TAGS.has(tag)) {
+        const fragment = doc.createDocumentFragment();
+        while (element.firstChild) {
+          fragment.appendChild(element.firstChild);
+        }
+        element.replaceWith(fragment);
+        continue;
+      }
+
+      const allowedAttributes = REPORT_ALLOWED_ATTRIBUTES[tag] || new Set<string>();
+      for (const attr of Array.from(element.attributes)) {
+        const name = attr.name.toLowerCase();
+        const value = attr.value.trim();
+
+        if (name.startsWith('on') || name === 'style' || !allowedAttributes.has(name)) {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+
+        if (tag === 'a' && name === 'href' && !/^(https?:|mailto:|tel:|#)/i.test(value)) {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+
+        if (tag === 'a' && name === 'target' && value !== '_blank') {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+
+        if (tag === 'code' && name === 'class' && !/^language-[a-z0-9_-]+$/i.test(value)) {
+          element.removeAttribute(attr.name);
+        }
+      }
+
+      if (tag === 'a' && element.getAttribute('href')) {
+        element.setAttribute('rel', 'noopener noreferrer');
+        if (!element.getAttribute('target')) {
+          element.setAttribute('target', '_blank');
+        }
+      }
+    }
+  };
+
+  sanitizeNode(doc.body);
+  return doc.body.innerHTML;
+}
+
+function wrapReportTables(html: string): string {
+  if (!/<table\b/i.test(html) || typeof DOMParser === 'undefined') {
+    return html;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  for (const table of Array.from(doc.body.querySelectorAll('table'))) {
+    if (table.parentElement?.classList.contains('report-table-wrap')) {
+      continue;
+    }
+    const wrapper = doc.createElement('div');
+    wrapper.className = 'report-table-wrap';
+    table.parentNode?.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+  }
+
+  return doc.body.innerHTML;
+}
+
+function extractReportPlainText(report: string): string {
+  const normalized = String(report || '').replace(/\r\n/g, '\n');
+  if (!normalized.trim()) {
+    return '';
+  }
+
+  if (isLikelyHtmlReport(normalized)) {
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(sanitizeReportHtml(normalized), 'text/html');
+      return String(doc.body.textContent || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+    return normalized.replace(/<[^>]+>/g, ' ');
+  }
+
+  return normalized
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*\n?/gi, '').replace(/```/g, ''))
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*+]\s*/gm, '')
+    .replace(/^\s*\d+\.\s*/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\|/g, ' ')
+    .trim();
+}
+
+function renderReportContent(content: string): string {
+  const normalized = String(content || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  if (isLikelyHtmlReport(normalized)) {
+    return wrapReportTables(sanitizeReportHtml(normalized));
+  }
+
   try {
     marked.setOptions({
       gfm: true,
       breaks: true,
     });
-    return String(marked.parse(String(md || '').replace(/\r\n/g, '\n')));
+    return wrapReportTables(sanitizeReportHtml(String(marked.parse(normalized))));
   } catch {
-    return escapeReportHtml(String(md || '')).replace(/\n/g, '<br>');
+    return wrapReportTables(escapeReportHtml(normalized).replace(/\n/g, '<br>'));
   }
 }
 
@@ -2016,40 +2226,45 @@ function buildFallbackPentestReport(params: {
   const vulnCount = params.vulnCount || 0;
   const findingsCount = params.findingsCount || 0;
   const riskLevel = getPentestRiskLevel(vulnCount, 0);
+  const phaseLabel = getPhaseLabel(params.phase);
+  const progressText = params.error
+    ? `本次渗透测试在 ${phaseLabel} 阶段结束，原因：${params.error}`
+    : `本次渗透测试在 ${phaseLabel} 阶段结束。`;
+
   return [
-    '# 渗透测试报告',
-    '',
-    '## 面向管理层的执行摘要',
-    '',
-    `1. 当前任务在 ${getPhaseLabel(params.phase)} 阶段结束，已识别 ${findingsCount} 项资产与 ${vulnCount} 项风险线索，当前总体风险等级按现有结果评估为 ${riskLevel}。`,
-    '2. 该阶段性报告基于当前已落盘结果整理，可用于企业侧先行开展暴露面收敛、补丁核查和访问控制加固。',
-    '3. 若后续正式报告已生成，应以正式报告中的漏洞清单、影响分析、攻击路径与分级整改建议为准。',
-    '',
-    '## 当前进展',
-    params.error
-      ? `本次渗透测试在 ${getPhaseLabel(params.phase)} 阶段结束，原因：${params.error}`
-      : `本次渗透测试在 ${getPhaseLabel(params.phase)} 阶段结束。`,
-    '',
-    '## 概览',
-    `- 目标: ${target}`,
-    `- 风险等级: ${riskLevel}`,
-    `- 任务轮次: ${countTaskRounds(params.actions as Array<Record<string, any>> | undefined) || 0} 轮`,
-    `- 发现资产: ${findingsCount} 项`,
-    `- 发现风险项: ${vulnCount} 项`,
-    '',
-    '## 企业处置建议',
-    '- 立即对目标资产开展暴露面收敛，限制互联网访问、临时下线高危服务或增加访问控制白名单。',
-    '- 对外网暴露服务执行补丁、版本与配置核查，优先验证远程命令执行、未授权访问、弱认证和敏感信息泄露相关风险。',
-    '- 对高权限账号、服务账号和共享凭据执行轮换，核查 SSH、数据库、FTP、Web 管理口等关键入口的认证与最小权限策略。',
-    '- 由应用负责人、系统负责人和安全负责人联合完成复测闭环，并保留日志、会话、命令回显等证据用于事件追踪。',
-    '',
-    '## 说明',
-    '- 当前为阶段性兜底报告，详细漏洞证据与整改优先级请结合正式报告或任务日志中的完整输出执行。',
+    reportH1('渗透测试报告'),
+    reportH2('面向管理层的执行摘要'),
+    reportOlText([
+      `当前任务在 ${phaseLabel} 阶段结束，已识别 ${findingsCount} 项资产与 ${vulnCount} 项风险线索，当前总体风险等级按现有结果评估为 ${riskLevel}。`,
+      '该阶段性报告基于当前已落盘结果整理，可用于企业侧先行开展暴露面收敛、补丁核查和访问控制加固。',
+      '若后续正式报告已生成，应以正式报告中的漏洞清单、影响分析、攻击路径与分级整改建议为准。',
+    ]),
+    reportH2('当前进展'),
+    reportP(progressText),
+    reportH2('概览'),
+    reportUl([
+      reportStrongLi('目标', target),
+      reportStrongLi('风险等级', riskLevel),
+      reportStrongLi('任务轮次', `${countTaskRounds(params.actions as Array<Record<string, any>> | undefined) || 0} 轮`),
+      reportStrongLi('发现资产', `${findingsCount} 项`),
+      reportStrongLi('发现风险项', `${vulnCount} 项`),
+    ]),
+    reportH2('企业处置建议'),
+    reportUl([
+      reportLiHtml(formatReportInline('立即对目标资产开展暴露面收敛，限制互联网访问、临时下线高危服务或增加访问控制白名单。')),
+      reportLiHtml(formatReportInline('对外网暴露服务执行补丁、版本与配置核查，优先验证远程命令执行、未授权访问、弱认证和敏感信息泄露相关风险。')),
+      reportLiHtml(formatReportInline('对高权限账号、服务账号和共享凭据执行轮换，核查 SSH、数据库、FTP、Web 管理口等关键入口的认证与最小权限策略。')),
+      reportLiHtml(formatReportInline('由应用负责人、系统负责人和安全负责人联合完成复测闭环，并保留日志、会话、命令回显等证据用于事件追踪。')),
+    ]),
+    reportH2('说明'),
+    reportUl([
+      reportLiHtml(formatReportInline('当前为阶段性兜底报告，详细漏洞证据与整改优先级请结合正式报告或任务日志中的完整输出执行。')),
+    ]),
   ].join('\n');
 }
 
 function extractPotentialVulnerabilityHints(report: string, vulnCount: number): string[] {
-  const lines = report
+  const lines = extractReportPlainText(report)
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
@@ -2116,7 +2331,7 @@ function inferFindingRecommendation(text: string) {
 }
 
 function buildFindingDetails(report: string, vulnCount: number) {
-  const lines = report
+  const lines = extractReportPlainText(report)
     .split('\n')
     .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
     .filter((line) => line.length > 0);
@@ -2157,7 +2372,7 @@ function buildGeneralRemediations(findings: Array<{ recommendation: string }>, f
   return recommendations.slice(0, 6);
 }
 
-function buildAssetSummary(target: string, logs: PentestLogEntry[], findingsCount: number, vulnCount: number) {
+function buildAssetSummaryHtml(target: string, logs: PentestLogEntry[], findingsCount: number, vulnCount: number) {
   const actionableLogs = logs.filter((log) => !String(log.tool || '').startsWith('_'));
   const surfaces = Array.from(new Set(
     actionableLogs.map((log) => summarizeActionPayload(log.surface, '', 40)).filter(Boolean)
@@ -2183,16 +2398,28 @@ function buildAssetSummary(target: string, logs: PentestLogEntry[], findingsCoun
     .slice(0, 10);
 
   return [
-    `- **目标资产**：${target || '未知目标'}`,
-    `- **资产发现概况**：共识别 ${findingsCount || 0} 项资产线索，关联 ${vulnCount || 0} 项风险。`,
-    surfaces.length > 0 ? `- **涉及攻击面**：${surfaces.join('、')}` : '- **涉及攻击面**：当前以基础探测结果为主，建议结合日志继续细化。',
-    portMatches.length > 0 ? `- **关键端口/入口**：${portMatches.join('、')}` : '- **关键端口/入口**：当前报告未提取到明确端口信息，可从执行日志继续确认。',
-    serviceMatches.length > 0 ? `- **关联服务**：${serviceMatches.join('、')}` : '- **关联服务**：当前报告未提取到明确服务名称，可结合原始输出补充。',
-    tools.length > 0 ? `- **证据来源工具**：${tools.join('、')}` : '- **证据来源工具**：暂无可用工具证据摘要。',
+    reportStrongLi('目标资产', target || '未知目标'),
+    reportStrongLi('资产发现概况', `共识别 ${findingsCount || 0} 项资产线索，关联 ${vulnCount || 0} 项风险。`),
+    reportStrongLi(
+      '涉及攻击面',
+      surfaces.length > 0 ? surfaces.join('、') : '当前以基础探测结果为主，建议结合日志继续细化。',
+    ),
+    reportStrongLi(
+      '关键端口/入口',
+      portMatches.length > 0 ? portMatches.join('、') : '当前报告未提取到明确端口信息，可从执行日志继续确认。',
+    ),
+    reportStrongLi(
+      '关联服务',
+      serviceMatches.length > 0 ? serviceMatches.join('、') : '当前报告未提取到明确服务名称，可结合原始输出补充。',
+    ),
+    reportStrongLi(
+      '证据来源工具',
+      tools.length > 0 ? tools.join('、') : '暂无可用工具证据摘要。',
+    ),
   ];
 }
 
-function buildRemediationPlan(findings: Array<{ title: string; summary: string; severity: string; recommendation: string }>) {
+function buildRemediationPlanHtml(findings: Array<{ title: string; summary: string; severity: string; recommendation: string }>) {
   const prioritized = findings.length > 0 ? findings : [{
     title: '通用整改项',
     summary: '当前未抽取到明确风险项名称，建议先依据完整日志补齐风险与资产映射。',
@@ -2209,15 +2436,16 @@ function buildRemediationPlan(findings: Array<{ title: string; summary: string; 
         : '完成配置核查与证据复核后，再执行针对性复测确认整改效果。';
 
     return [
-      `### 整改项 ${index + 1}：${item.title}`,
-      `- **对应风险**：${item.summary}`,
-      `- **整改优先级**：${priority}`,
-      `- **修复动作**：${item.recommendation}`,
-      `- **复测要求**：${verification}`,
-      `- **交付建议**：保留修复前后配置差异、执行截图与复测结果，纳入整改闭环记录。`,
-      '',
-    ];
-  }).flat();
+      reportH3(`整改项 ${index + 1}：${item.title}`),
+      reportUl([
+        reportStrongLi('对应风险', item.summary),
+        reportStrongLi('整改优先级', priority),
+        reportStrongLi('修复动作', item.recommendation),
+        reportStrongLi('复测要求', verification),
+        reportStrongLi('交付建议', '保留修复前后配置差异、执行截图与复测结果，纳入整改闭环记录。'),
+      ]),
+    ].join('\n');
+  }).join('\n');
 }
 
 function getPentestRiskLevel(vulnCount: number, failedCount: number) {
@@ -2248,85 +2476,96 @@ function buildUserFacingPentestReport(params: {
   }).filter(Boolean))).slice(0, 6);
 
   const successItems = completedLogs.slice(0, 6).map((log) =>
-    buildReportListItem(log.tool, log.result || log.full_stdout || log.purpose, '执行完成', 150)
+    buildReportListItemHtml(log.tool, log.result || log.full_stdout || log.purpose, '执行完成', 150)
   );
   const failureItems = failedLogs.slice(0, 6).map((log) =>
-    buildReportListItem(log.tool, log.error || log.result || log.full_stdout, '执行失败', 150)
+    buildReportListItemHtml(log.tool, log.error || log.result || log.full_stdout, '执行失败', 150)
   );
   const decisionItems = Array.from(new Set(
     logs
       .map((log) => summarizeReportValue(log.llm_decision, '', 220))
       .filter(Boolean)
-  )).slice(0, 4).map((item, index) => `${index + 1}. ${item}`);
+  )).slice(0, 4);
   const target = params.target || normalizedPentestTarget.value || '未知目标';
   const vulnHints = extractPotentialVulnerabilityHints(params.backendReport || '', params.vulnCount || 0);
   const findingDetails = buildFindingDetails(params.backendReport || '', params.vulnCount || 0);
   const remediationItems = buildGeneralRemediations(findingDetails, failedLogs);
-  const assetSummary = buildAssetSummary(target, actionableLogs, params.findingsCount || 0, params.vulnCount || 0);
-  const remediationPlan = buildRemediationPlan(findingDetails);
+  const assetSummary = buildAssetSummaryHtml(target, actionableLogs, params.findingsCount || 0, params.vulnCount || 0);
+  const remediationPlan = buildRemediationPlanHtml(findingDetails);
   const riskLevel = getPentestRiskLevel(params.vulnCount || 0, failedLogs.length);
   const phaseLabel = getPhaseLabel(params.phase);
   const workedOnText = workedOn.length > 0 ? workedOn.join('；') : '已进行基础环境检查与探测';
   const statusSummary = params.error
     ? `本次渗透测试在 **${phaseLabel}** 阶段结束。结束原因：${params.error}`
     : `本次渗透测试已在 **${phaseLabel}** 阶段结束，当前结果可用于继续复核、修复和留痕。`;
+  const overallConclusion = `本次渗透测试围绕目标 **${target}** 完成了 ${workedOnText} 等工作。综合已确认风险、失败项和可用证据，当前目标整体风险等级评估为 **${riskLevel}**。${params.vulnCount ? '建议优先处理已识别风险，并在修复后安排复测。' : '当前未发现明确高风险漏洞，但仍建议结合业务场景继续复核。'}`;
 
   return [
-    '# 渗透测试报告',
-    '',
-    '## 执行总结',
-    statusSummary,
-    '',
-    '## 概览',
-    `- **目标**：${target}`,
-    `- **结束阶段**：${phaseLabel}`,
-    `- **风险等级**：${riskLevel}`,
-    `- **任务轮次**：${countTaskRounds(actionableLogs as Array<Record<string, any>>) || 0} 轮`,
-    `- **成功项**：${completedLogs.length} 项`,
-    `- **失败项**：${failedLogs.length} 项`,
-    `- **发现资产**：${params.findingsCount || 0} 项`,
-    `- **发现风险项**：${params.vulnCount || 0} 项`,
-    '',
-    '## 总体结论',
-    `本次渗透测试围绕目标 **${target}** 完成了 ${workedOnText} 等工作。综合已确认风险、失败项和可用证据，当前目标整体风险等级评估为 **${riskLevel}**。${params.vulnCount ? '建议优先处理已识别风险，并在修复后安排复测。' : '当前未发现明确高风险漏洞，但仍建议结合业务场景继续复核。'}`,
-    '',
-    '## 关键结果',
-    ...(successItems.length > 0 ? successItems : ['- 暂无明确成功结果']),
-    '',
-    '## 失败与阻塞',
-    ...(failureItems.length > 0 ? failureItems : ['- 暂无明确失败项']),
-    '',
-    '## 风险摘要',
-    ...(vulnHints.length > 0 ? vulnHints.map((item) => `- ${item}`) : ['- 暂未发现明确可直接利用的漏洞，建议结合日志继续验证。']),
-    '',
-    '## 漏洞资产总结',
-    ...assetSummary,
-    '',
-    '## 风险明细',
-    ...(findingDetails.length > 0
+    reportH1('渗透测试报告'),
+    reportH2('执行总结'),
+    reportP(statusSummary),
+    reportH2('概览'),
+    reportUl([
+      reportStrongLi('目标', target),
+      reportStrongLi('结束阶段', phaseLabel),
+      reportStrongLi('风险等级', riskLevel),
+      reportStrongLi('任务轮次', `${countTaskRounds(actionableLogs as Array<Record<string, any>>) || 0} 轮`),
+      reportStrongLi('成功项', `${completedLogs.length} 项`),
+      reportStrongLi('失败项', `${failedLogs.length} 项`),
+      reportStrongLi('发现资产', `${params.findingsCount || 0} 项`),
+      reportStrongLi('发现风险项', `${params.vulnCount || 0} 项`),
+    ]),
+    reportH2('总体结论'),
+    reportP(overallConclusion),
+    reportH2('关键结果'),
+    reportUl(successItems.length > 0 ? successItems : [reportLiHtml(formatReportInline('暂无明确成功结果'))]),
+    reportH2('失败与阻塞'),
+    reportUl(failureItems.length > 0 ? failureItems : [reportLiHtml(formatReportInline('暂无明确失败项'))]),
+    reportH2('风险摘要'),
+    reportUl(
+      vulnHints.length > 0
+        ? vulnHints.map((item) => reportLiHtml(formatReportInline(item)))
+        : [reportLiHtml(formatReportInline('暂未发现明确可直接利用的漏洞，建议结合日志继续验证。'))],
+    ),
+    reportH2('漏洞资产总结'),
+    reportUl(assetSummary),
+    reportH2('风险明细'),
+  ...(findingDetails.length > 0
       ? findingDetails.flatMap((item) => [
-          `### ${item.title}（${item.severity}）`,
-          `- **发现内容**：${item.summary}`,
-          `- **影响分析**：${item.impact}`,
-          `- **处置建议**：${item.recommendation}`,
-          '',
+          reportH3(`${item.title}（${item.severity}）`),
+          reportUl([
+            reportStrongLi('发现内容', item.summary),
+            reportStrongLi('影响分析', item.impact),
+            reportStrongLi('处置建议', item.recommendation),
+          ]),
         ])
-      : ['- 当前未提取到可单独成项的风险明细，建议结合完整日志与原始输出继续复核。', '']),
-    '## 修复建议',
-    ...(remediationItems.length > 0 ? remediationItems.map((item) => `- ${item}`) : ['- 暂无补充修复建议']),
-    '',
-    '## 漏洞修复整改报告',
-    ...remediationPlan,
-    '## 复测建议',
-    '- 修复完成后针对已识别风险项逐一复测，确认利用路径、弱配置或暴露面已被关闭。',
-    '- 对失败或未完成的探测步骤安排补测，避免因环境因素导致风险遗漏。',
-    '- 保留本次执行日志、关键截图和原始输出，作为后续整改闭环与审计留痕依据。',
-    '',
-    '## AI 决策摘要',
-    ...(decisionItems.length > 0 ? decisionItems : ['1. 暂无 AI 决策记录']),
-    '',
-    '## 说明',
-    '- 页面展示的是面向阅读的渗透测试报告，详细参数、原始输出和完整过程请查看右上角“日志”。',
+      : [
+          reportUl([
+            reportLiHtml(formatReportInline('当前未提取到可单独成项的风险明细，建议结合完整日志与原始输出继续复核。')),
+          ]),
+        ]),
+    reportH2('修复建议'),
+    reportUl(
+      remediationItems.length > 0
+        ? remediationItems.map((item) => reportLiHtml(formatReportInline(item)))
+        : [reportLiHtml(formatReportInline('暂无补充修复建议'))],
+    ),
+    reportH2('漏洞修复整改报告'),
+    remediationPlan,
+    reportH2('复测建议'),
+    reportUl([
+      reportLiHtml(formatReportInline('修复完成后针对已识别风险项逐一复测，确认利用路径、弱配置或暴露面已被关闭。')),
+      reportLiHtml(formatReportInline('对失败或未完成的探测步骤安排补测，避免因环境因素导致风险遗漏。')),
+      reportLiHtml(formatReportInline('保留本次执行日志、关键截图和原始输出，作为后续整改闭环与审计留痕依据。')),
+    ]),
+    reportH2('AI 决策摘要'),
+    decisionItems.length > 0
+      ? reportOlText(decisionItems)
+      : reportOlText(['暂无 AI 决策记录']),
+    reportH2('说明'),
+    reportUl([
+      reportLiHtml(formatReportInline('页面展示的是面向阅读的渗透测试报告，详细参数、原始输出和完整过程请查看右上角“日志”。')),
+    ]),
   ].join('\n');
 }
 
@@ -2344,6 +2583,7 @@ async function resolvePentestFinalReport(params: {
   let finalPhase = params.phase;
   let normalizedLogs: PentestLogEntry[] = [];
   let tokenUsage: Record<string, any> = {};
+  let reportResponse: { view?: unknown } | null = null;
 
   try {
     const pythonApi = (await import('../../config/python-api.config')).default;
@@ -2351,6 +2591,7 @@ async function resolvePentestFinalReport(params: {
       pythonApi.pentestGetReport(params.taskId).catch(() => null),
       pythonApi.pentestLogs(params.taskId).catch(() => null),
     ]);
+    reportResponse = report;
     backendReport = String(report?.report || '').trim();
     finalPhase = report?.phase || params.phase;
     tokenUsage = report?.token_usage || {};
@@ -2359,13 +2600,25 @@ async function resolvePentestFinalReport(params: {
     // ignore and use fallback
   }
 
+  const clientReport = buildUserFacingPentestReport({
+    ...params,
+    phase: finalPhase,
+    backendReport,
+    logs: normalizedLogs,
+  }) || buildFallbackPentestReport(params);
+  const reportHtml = backendReport || clientReport;
+  const reportView = resolveReportView({
+    view: reportResponse?.view,
+    html: reportHtml,
+    context: {
+      taskId: params.taskId,
+      phaseLabel: getPhaseLabel(finalPhase),
+    },
+  });
+
   return {
-    report: buildUserFacingPentestReport({
-      ...params,
-      phase: finalPhase,
-      backendReport,
-      logs: normalizedLogs,
-    }) || buildFallbackPentestReport(params),
+    report: reportHtml,
+    view: reportView,
     phase: finalPhase,
     tokenUsage,
   };
@@ -2442,7 +2695,7 @@ async function buildInterruptedPentestSummary(taskId: string, target: string = '
     const report = await aiService.chatStream([
       {
         role: 'system',
-        content: '你是一名面向企业客户的渗透测试报告助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 Markdown 报告。报告必须正式、客观，并给出企业侧可执行的漏洞解决方案。必须包含：1. 面向管理层的执行摘要 2. 当前阶段与进展 3. 已确认风险/异常 4. 对企业的分级修复建议（立即/24小时内/一周内/长期）5. 未完成项与下一步建议。不要虚构不存在的结果，不要输出内部调试口吻。',
+        content: '你是一名面向企业客户的渗透测试报告助手。任务已被用户手动中断，请严格基于当前阶段已确认的信息生成中文 HTML 报告片段。仅输出 HTML（使用 h1/h2/h3、p、ul/ol/li、table、strong、blockquote、pre/code 等标签），不要输出 Markdown，不要用 ```html 代码块包裹。报告必须正式、客观，并给出企业侧可执行的漏洞解决方案。必须包含：1. 面向管理层的执行摘要 2. 当前阶段与进展 3. 已确认风险/异常 4. 对企业的分级修复建议（立即/24小时内/一周内/长期）5. 未完成项与下一步建议。不要虚构不存在的结果，不要输出内部调试口吻。',
       },
       {
         role: 'user',
@@ -2479,12 +2732,27 @@ ${recentLogs || '暂无执行日志'}
         console.warn('写入 report_ai token_usage 失败:', error);
       }
     }
+    const baseReport = report?.trim() || fallbackReport;
     const reportWithUsage = aiUsage && aiUsage.total_tokens > 0
-      ? `${report?.trim() || fallbackReport}\n\n## Token 消耗统计\n\n- AI 解析报告: prompt ${aiUsage.prompt_tokens} / completion ${aiUsage.completion_tokens} / total ${aiUsage.total_tokens}\n`
-      : (report?.trim() || fallbackReport);
+      ? `${baseReport}${reportH2('Token 消耗统计')}${reportUl([
+          reportStrongLi(
+            'AI 解析报告',
+            `prompt ${aiUsage.prompt_tokens} / completion ${aiUsage.completion_tokens} / total ${aiUsage.total_tokens}`,
+          ),
+        ])}`
+      : baseReport;
+
+    const reportView = resolveReportView({
+      html: reportWithUsage,
+      context: {
+        taskId,
+        phaseLabel: getPhaseLabel(phase),
+      },
+    });
 
     return {
       report: reportWithUsage,
+      view: reportView,
       phase,
       findingsCount,
       vulnCount,
@@ -2505,6 +2773,13 @@ ${recentLogs || '暂无执行日志'}
   } catch {
     return {
       report: fallbackReport,
+      view: resolveReportView({
+        html: fallbackReport,
+        context: {
+          taskId,
+          phaseLabel: getPhaseLabel(phase),
+        },
+      }),
       phase,
       findingsCount,
       vulnCount,
@@ -2668,7 +2943,7 @@ async function pollStatusForTask(taskId: string) {
 
       updateTaskResult(taskId, {
         status: !status.error && status.phase === 'done' ? 'completed' : 'failed',
-        final: { report: report.report, phase: report.phase },
+        final: { report: report.report, view: report.view, phase: report.phase },
         phase: status.phase,
         targets: status.targets,
         findings_count: status.findings_count,
@@ -2750,7 +3025,9 @@ const logError = ref('');
 const logPhase = ref<string>('init');
 const currentLogTaskId = ref('');
 const logReport = ref('');
+const logReportView = ref<PentestReportView | null>(null);
 const logDetailRefs = ref<HTMLElement[]>([]);
+const logDetailsSectionRef = ref<HTMLElement | null>(null);
 const selectedLogActionId = ref('');
 
 let logTimer: ReturnType<typeof setInterval> | null = null;
@@ -2943,6 +3220,63 @@ const logRounds = computed<PentestLogRound[]>(() => {
   });
 });
 
+const logTaskStatusLabel = computed(() => {
+  const task = pentestTasks.value.find((item) => item.taskId === currentLogTaskId.value);
+  if (task?.running) {
+    return '运行中';
+  }
+  if (task?.error) {
+    return '已失败';
+  }
+  if (logPhase.value === 'done') {
+    return '已完成';
+  }
+  if (currentLogTaskId.value === currentTaskId.value && agentRunning.value) {
+    return '运行中';
+  }
+  return getPhaseLabel(logPhase.value);
+});
+
+const logReportContext = computed(() => ({
+  taskId: currentLogTaskId.value,
+  phaseLabel: getPhaseLabel(logPhase.value),
+  statusLabel: logTaskStatusLabel.value,
+  logRounds: logRounds.value.length,
+  logActions: logData.value.length,
+}));
+
+const renderedLogReportHtml = computed(() => renderReportContent(logReport.value));
+
+const agentReportContext = computed(() => ({
+  taskId: currentTaskId.value,
+  phaseLabel: getPhaseLabel(agentResult.value?.final?.phase || agentResult.value?.phase || 'init'),
+}));
+
+const agentReportHtml = computed(() => renderReportContent(String(agentResult.value?.final?.report || '')));
+
+const agentReportView = computed(() => {
+  const finalResult = agentResult.value?.final;
+  if (!finalResult?.report && !finalResult?.view) {
+    return null;
+  }
+  return resolveReportView({
+    view: finalResult.view,
+    html: String(finalResult.report || ''),
+    context: agentReportContext.value,
+  });
+});
+
+function applyReportView(
+  target: { value: PentestReportView | null },
+  params: { view?: unknown; html?: string; context?: { taskId?: string; phaseLabel?: string; logRounds?: number; logActions?: number } },
+) {
+  target.value = resolveReportView({
+    view: params.view,
+    html: params.html,
+    context: params.context,
+  });
+}
+
 function stopLogPolling() {
   if (logTimer) {
     clearInterval(logTimer);
@@ -2973,6 +3307,7 @@ async function openLogModal(taskId?: string) {
   if (!tid) {
     logData.value = [];
     logReport.value = '';
+    logReportView.value = null;
     logPhase.value = 'init';
     logError.value = '当前任务尚未生成日志，请稍后再试。';
     return;
@@ -2981,6 +3316,7 @@ async function openLogModal(taskId?: string) {
   if (currentLogTaskId.value !== tid) {
     logData.value = [];
     logReport.value = '';
+    logReportView.value = null;
   }
   currentLogTaskId.value = tid;
   await loadLogs(tid);
@@ -3013,7 +3349,18 @@ async function loadLogs(taskId?: string, silent = false) {
     const fallbackReport = tid === currentTaskId.value
       ? String(agentResult.value?.final?.report || '').trim()
       : '';
-    logReport.value = String(reportRes?.report || fallbackReport).trim();
+    const reportHtml = String(reportRes?.report || fallbackReport).trim();
+    logReport.value = reportHtml;
+    applyReportView(logReportView, {
+      view: reportRes?.view,
+      html: reportHtml,
+      context: {
+        taskId: tid,
+        phaseLabel: getPhaseLabel(logPhase.value),
+        logRounds: logRounds.value.length,
+        logActions: logData.value.length,
+      },
+    });
   } catch (err: any) {
     console.error('加载日志失败:', err);
     logError.value = err?.message || '加载日志失败';
@@ -3028,6 +3375,11 @@ watch(logData, () => {
 }, { deep: true });
 
 function scrollLogDetailsIntoView() {
+  const section = logDetailsSectionRef.value;
+  if (section) {
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const firstDetail = logDetailRefs.value[0];
   if (!firstDetail) {
     return;
@@ -4811,15 +5163,19 @@ onMounted(() => {
 .payloader-agent-report-content ol { margin: 8px 0 12px 18px; padding: 0; }
 .payloader-agent-report-content li { margin: 4px 0; padding-left: 4px; }
 .payloader-agent-report-content hr { border: none; border-top: 1px solid var(--border-color); margin: 12px 0; }
-.payloader-agent-report-content table {
+.payloader-agent-report-content .report-table-wrap {
   width: 100%;
-  border-collapse: collapse;
+  overflow-x: auto;
   margin: 12px 0 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.payloader-agent-report-content table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  margin: 0;
   font-size: 13px;
   line-height: 1.5;
-  table-layout: fixed;
-  display: block;
-  overflow-x: auto;
   white-space: normal;
 }
 .payloader-agent-report-content thead {
@@ -5842,11 +6198,17 @@ onMounted(() => {
 
 /* ── 日志模态框 ── */
 .payloader-modal--log {
-  width: 85vw;
-  max-width: 1200px;
-  height: 80vh;
+  width: 92vw;
+  max-width: 1440px;
+  height: 88vh;
   display: flex;
   flex-direction: column;
+}
+
+.payloader-modal-header--log {
+  padding: 12px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
 }
 
 .payloader-modal-header-actions {
@@ -5903,8 +6265,8 @@ onMounted(() => {
 .payloader-log-body {
   flex: 1;
   overflow-y: auto;
-  background: var(--bg-tertiary);
-  padding: 16px;
+  background: #f3f4f6;
+  padding: 16px 18px 20px;
 }
 
 .payloader-log-layout {
@@ -6012,6 +6374,30 @@ onMounted(() => {
   border-radius: 10px;
   background: var(--bg-secondary);
   padding: 16px 18px;
+}
+
+.payloader-log-report-section--dashboard,
+.payloader-agent-report-section--dashboard {
+  border: none;
+  background: transparent;
+  padding: 0 0 18px;
+}
+
+.payloader-log-details-section {
+  margin-top: 4px;
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.payloader-log-details-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.payloader-agent-report-section--dashboard .payloader-agent-section-title {
+  margin-bottom: 12px;
 }
 
 .payloader-log-report-header {

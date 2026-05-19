@@ -1,30 +1,28 @@
 <template>
-  <div class="main-workspace">
-    <div class="workspace-content page-transition" id="workspace-content">
-      <template v-if="state.loading">
-        <div v-html="renderer.renderLoadingStateForVue()"></div>
+  <div class="workspace-pages-root">
+    <template v-if="state.loading">
+      <div v-html="renderer.renderLoadingStateForVue()"></div>
+    </template>
+    <template v-else-if="!state.isConnected">
+      <div v-html="renderer.renderConnectionPromptForVue()"></div>
+    </template>
+    <template v-else>
+      <template v-for="pageId in pageIds" :key="pageId">
+        <LegacyPageHost
+          v-if="pageId !== 'payloader'"
+          :page-id="pageId"
+          :visible="state.currentPage === pageId"
+          :renderer="renderer"
+        />
       </template>
-      <template v-else-if="!state.isConnected">
-        <div v-html="renderer.renderConnectionPromptForVue()"></div>
-      </template>
-      <template v-else>
-        <template v-for="pageId in pageIds" :key="pageId">
-          <LegacyPageHost
-            v-if="pageId !== 'payloader'"
-            :page-id="pageId"
-            :visible="state.currentPage === pageId"
-            :renderer="renderer"
-          />
-        </template>
-        <div
-          id="page-payloader"
-          class="page-container"
-          v-show="state.currentPage === 'payloader'"
-        >
-          <PayloaderPage />
-        </div>
-      </template>
-    </div>
+      <div
+        id="page-payloader"
+        class="page-container"
+        v-show="state.currentPage === 'payloader'"
+      >
+        <PayloaderPage />
+      </div>
+    </template>
   </div>
 </template>
 
@@ -56,3 +54,12 @@ onBeforeUnmount(() => {
   props.stateManager.removeListener(handleStateChange);
 });
 </script>
+
+<style scoped>
+.workspace-pages-root {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+</style>

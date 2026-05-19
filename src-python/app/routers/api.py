@@ -1770,6 +1770,7 @@ async def pentest_get_report(task_id: str):
         content = f.read()
     return {
         "report": content,
+        "view": state.build_report_view_model(),
         "phase": state.data["phase"],
         "task_id": task_id,
         "token_usage": state.data.get("token_usage", {}),
@@ -1864,6 +1865,7 @@ async def pentest_delete_history(task_id: str):
             continue
 
     report_candidates = [
+        os.path.join(_PENTEST_STATE_DIR, f"pentest_report_{task_id}.html"),
         os.path.join(_PENTEST_STATE_DIR, f"pentest_report_{task_id}.md"),
     ]
     for report_path in dict.fromkeys(report_candidates):

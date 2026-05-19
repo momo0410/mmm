@@ -448,6 +448,7 @@ export class SDITApp {
       await this.sshManager.disconnect();
       await sshConnectionManager.disconnect();
       this.stateManager.setConnected(false);
+      this.render();
       this.showMessage('已断开 SSH 连接', 'info');
       const cache = (window as any).systemInfoCache;
       if (cache) {

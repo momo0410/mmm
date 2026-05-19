@@ -218,9 +218,15 @@ export class ModernUIRenderer {
   private rerenderConnectionPanel(): void {
     console.log('🔄 开始重新渲染连接面板，当前主题:', this.state.theme);
 
-    const sidebar = document.querySelector('.modern-sidebar');
+    const panelSlot = document.querySelector('.connection-panel-slot') as HTMLElement | null;
+    if (panelSlot) {
+      panelSlot.innerHTML = this.renderConnectionPanel();
+      return;
+    }
+
+    const sidebar = document.querySelector('.modern-sidebar, .workspace-toolbar');
     if (!sidebar) {
-      console.warn('⚠️ 未找到 .modern-sidebar');
+      console.warn('⚠️ 未找到连接面板宿主');
       return;
     }
 
@@ -377,18 +383,18 @@ export class ModernUIRenderer {
         <!-- 右下角控制区 -->
         <div class="sidebar-right-controls">
           <div class="sidebar-settings-container">
-              ${this.renderSettingsMenu()}
-              <!-- 终端按钮 -->
-              ${this.renderSSHTerminalTitleButton()}
-              <button class="nav-item settings-btn" data-tooltip="设置" onclick="window.toggleSettingsDropdown()">
-                  <span class="nav-item-icon">
-                      ${SettingTwo({ theme: 'outline', size: '18', fill: 'currentColor' })}
-                  </span>
-                  <span class="nav-item-text">设置</span>
-              </button>
+            ${this.renderSettingsMenu()}
+            <!-- 终端按钮 -->
+            ${this.renderSSHTerminalTitleButton()}
+            <button class="nav-item settings-btn" data-tooltip="设置" onclick="window.toggleSettingsDropdown()">
+              <span class="nav-item-icon">
+                ${SettingTwo({ theme: 'outline', size: '18', fill: 'currentColor' })}
+              </span>
+              <span class="nav-item-text">设置</span>
+            </button>
           </div>
           <div>
-              ${this.renderConnectionPanel()}
+            ${this.renderConnectionPanel()}
           </div>
         </div>
       </div>
@@ -854,7 +860,7 @@ export class ModernUIRenderer {
    */
   renderMainWorkspace(): string {
     this.currentVisiblePage = this.state.currentPage;
-    return renderWorkspaceShell('<div id="workspace-vue-root"></div>');
+    return renderWorkspaceShell('<div id="workspace-vue-root" class="workspace-pages-host"></div>');
   }
 
   /**

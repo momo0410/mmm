@@ -536,7 +536,7 @@ class PythonApi {
   }
 
   async pentestGetReport(taskId: string) {
-    return this.request<{report: string; phase: string; task_id: string; token_usage?: Record<string, any>}>('GET', '/agent/report', undefined, { task_id: taskId });
+    return this.request<{report: string; view?: Record<string, any>; phase: string; task_id: string; token_usage?: Record<string, any>}>('GET', '/agent/report', undefined, { task_id: taskId });
   }
 
   async pentestRecordTokenUsage(params: {

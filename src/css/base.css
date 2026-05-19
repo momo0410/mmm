@@ -1156,6 +1156,76 @@ body,
   white-space: nowrap;
 }
 
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  flex: 0 0 auto;
+}
+
+.workspace-toolbar-nav {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.workspace-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-tab-btn {
+  min-height: 40px;
+  padding: 10px 14px;
+  gap: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.workspace-tab-label,
+.workspace-action-label {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-toolbar .nav-item-indicator {
+  left: 12px;
+  right: 12px;
+  top: auto;
+  bottom: 6px;
+  width: auto;
+  height: 2px;
+  transform: none;
+  border-radius: 999px;
+}
+
+.workspace-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.workspace-action-btn {
+  min-height: 40px;
+  padding: 10px 14px;
+  gap: 0;
+}
+
+.workspace-settings-container {
+  flex: 0 0 auto;
+}
+
+.connection-panel-slot {
+  display: flex;
+  align-items: center;
+}
+
 .workspace-content {
   flex: 1;
   height: 100%;
@@ -1164,6 +1234,39 @@ body,
   flex-direction: column;
   align-items: stretch;
   overflow-y: auto;
+}
+
+.workspace-pages-host {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.workspace-toolbar .settings-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: 420px;
+  min-width: 420px;
+  max-width: min(420px, calc(100vw - 28px));
+}
+
+.workspace-toolbar .connection-card-wrapper {
+  margin-top: 0;
+  overflow: visible;
+}
+
+.workspace-toolbar .connection-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: min(460px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
 }
 
 .workspace-content.page-transition {
@@ -1199,6 +1302,29 @@ body,
 
   .workspace-brand-name {
     font-size: 14px;
+  }
+
+  .workspace-toolbar {
+    padding: 0 16px 12px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .workspace-toolbar .settings-dropdown-menu,
+  .workspace-toolbar .connection-dropdown-menu {
+    position: fixed;
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    left: auto;
+    width: calc(100vw - 28px);
+    min-width: 0;
+    max-width: calc(100vw - 28px);
   }
 }
 

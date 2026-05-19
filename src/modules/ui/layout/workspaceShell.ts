@@ -1,6 +1,6 @@
 import type { AppPage } from '../pageTypes';
 
-export function renderWorkspaceShell(content: string): string {
+export function renderWorkspaceShell(content: string, headerContent: string = ''): string {
   return `
     <div class="main-workspace">
       <div class="workspace-brand" aria-label="安御智测">
@@ -9,6 +9,7 @@ export function renderWorkspaceShell(content: string): string {
         </div>
         <div class="workspace-brand-name">安御智测</div>
       </div>
+      ${headerContent}
       <div class="workspace-content page-transition" id="workspace-content">
         ${content}
       </div>
