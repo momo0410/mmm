@@ -45,12 +45,52 @@ def _sanitize_name(text: str) -> str:
     return text[:64] or "unnamed"
 
 
+def _extract_version_tag(service: str) -> str:
+    """从服务指纹中提取版本标签，如 'vsftpd 2.3.4' → 'vsftpd-234'"""
+    lowered = str(service or "").strip().lower()
+    # 提取服务名 + 版本号
+    match = re.match(r"(\S+)\s+(\d+[\d.]*)", lowered)
+    if match:
+        name = match.group(1).strip()
+        version = match.group(2).strip().replace(".", "")
+        return f"{name}-{version}"
+    # 只有服务名没有版本
+    name = lowered.split()[0] if lowered else ""
+    if name and len(name) >= 3:
+        return name
+    return ""
+
+
 class SkillGenerator:
     """从渗透测试 State 中自动生成 SKILL.md 技能文件"""
 
     def __init__(self, skills_root: str):
         self.skills_root = skills_root
         self.learned_dir = os.path.join(skills_root, "learned")
+        self._existing_skill_names: set[str] = set()
+        self._load_existing_skill_names()
+
+    def _load_existing_skill_names(self):
+        """扫描已有 skill 文件名，避免重复生成"""
+        for root, dirs, files in os.walk(self.skills_root):
+            for f in files:
+                if f.endswith(".md"):
+                    name = f.replace(".md", "").replace("SKILL", "").strip("-_").lower()
+                    if name:
+                        self._existing_skill_names.add(name)
+
+    def _has_existing_skill(self, skill_name: str, path: dict) -> bool:
+        """检查是否已有同名或功能相同的预置 skill"""
+        # 精确名字匹配
+        if skill_name in self._existing_skill_names:
+            return True
+        # 检查 service tag 是否有对应的 exploit skill
+        tag = path.get("tag", "")
+        if tag:
+            for existing in self._existing_skill_names:
+                if f"exploit-{tag}" in existing or f"{tag}-backdoor" in existing:
+                    return True
+        return False
 
     def generate_from_state(self, state) -> list[str]:
         """
@@ -76,10 +116,14 @@ class SkillGenerator:
             findings, actions, credentials, vulnerabilities, sessions, targets
         )
 
-        # 2. 每条攻击路径生成一个 skill
+        # 2. 每条攻击路径生成一个 skill（跳过已有预置 skill 的）
         for path in attack_paths:
+            skill_name = _sanitize_name(path['name'])
+            # 检查是否已有同名或相似的预置 skill
+            if self._has_existing_skill(skill_name, path):
+                continue
             skill_content = self._render_skill_md(path)
-            filename = f"{_sanitize_name(path['name'])}.md"
+            filename = f"{skill_name}.md"
             filepath = os.path.join(self.learned_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(skill_content)
@@ -176,8 +220,15 @@ class SkillGenerator:
                 if a.get("tool") not in {"_doctor", "_llm_wait", "_token_usage", "_done", "_skip", "_llm_error"}
             ]
 
+            # 用服务版本构建更精确的 skill 名字
+            version_tag = _extract_version_tag(svc_info["service"])
+            if version_tag:
+                name = f"exploit-{version_tag}" if exploit_success else f"recon-{version_tag}"
+            else:
+                name = f"exploit-{tag}-{port}" if exploit_success else f"recon-{tag}-{port}"
+
             path = {
-                "name": f"exploit-{tag}-{port}" if exploit_success else f"recon-{tag}-{port}",
+                "name": name,
                 "port": port,
                 "service": svc_info["service"],
                 "tag": tag,
