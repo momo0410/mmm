@@ -222,7 +222,7 @@ class SkillMatcher:
 
                 if "workflow" in target_sections and sections.workflow:
                     lines.append("**工作流程:**")
-                    lines.append(sections.workflow[:800])
+                    lines.append(sections.workflow[:2000])
                     lines.append("")
 
                 if "key_concepts" in target_sections and sections.key_concepts:

@@ -73,11 +73,15 @@ _KNOWN_SECTIONS = {
     "when to apply": "when_to_use",
     "prerequisites": "prerequisites",
     "workflow": "workflow",
+    "exploitation steps (execute these commands)": "workflow",
+    "exploitation steps": "workflow",
     "key concepts": "key_concepts",
     "tools & systems": "tools_and_systems",
     "tools and systems": "tools_and_systems",
     "common scenarios": "common_scenarios",
     "output format": "output_format",
+    "verification": "output_format",
+    "summary": "key_concepts",
 }
 
 
