@@ -126,41 +126,54 @@ class SkillLoader:
         if os.path.isfile(entry_path) and entry_path.endswith(".json"):
             return self._load_json_file(entry_path, category)
 
-        if os.path.isfile(entry_path) and os.path.basename(entry_path) == "SKILL.md":
+        if os.path.isfile(entry_path) and entry_path.endswith(".md"):
             return self._load_md_file(entry_path, category)
 
         return None
 
-    def _load_skill_dir(self, dir_path: str, category: str) -> LoadedSkill:
+    def _load_skill_dir(self, dir_path: str, category: str) -> list[LoadedSkill]:
+        """加载目录下的所有 .md 和 .json 文件为独立 skill"""
+        skills: list[LoadedSkill] = []
         json_path = ""
-        md_path = ""
+        md_files: list[str] = []
 
         for fname in os.listdir(dir_path):
             fpath = os.path.join(dir_path, fname)
             if fname == "SKILL.md" and os.path.isfile(fpath):
-                md_path = fpath
+                md_files.insert(0, fpath)  # SKILL.md 优先
+            elif fname.endswith(".md") and os.path.isfile(fpath):
+                md_files.append(fpath)
             elif fname.endswith(".json") and os.path.isfile(fpath):
                 json_path = fpath
 
-        json_data = None
-        md_data = None
-
-        if json_path:
-            json_data = self._read_json(json_path)
-        if md_path:
-            md_data = SkillMdParser.parse_file(md_path)
-
-        if json_data and md_data:
-            mode = "hybrid"
-        elif json_data:
-            mode = "pipeline"
-        elif md_data:
-            mode = "knowledge"
+        # 如果目录下有 SKILL.md，按传统方式加载为单个 skill
+        if md_files and os.path.basename(md_files[0]) == "SKILL.md":
+            json_data = None
+            md_data = None
+            if json_path:
+                json_data = self._read_json(json_path)
+            md_data = SkillMdParser.parse_file(md_files[0])
+            if json_data and md_data:
+                mode = "hybrid"
+            elif json_data:
+                mode = "pipeline"
+            else:
+                mode = "knowledge"
+            skill = self._merge(json_data, md_data, mode, dir_path, json_path, md_files[0], category)
+            skills.append(skill)
+            # 剩余 .md 文件作为独立 skill
+            for md_path in md_files[1:]:
+                s = self._load_md_file(md_path, category)
+                if s:
+                    skills.append(s)
         else:
-            mode = "knowledge"
+            # 没有 SKILL.md，每个 .md 文件都是独立 skill
+            for md_path in md_files:
+                s = self._load_md_file(md_path, category)
+                if s:
+                    skills.append(s)
 
-        skill = self._merge(json_data, md_data, mode, dir_path, json_path, md_path, category)
-        return skill
+        return skills
 
     def _load_json_file(self, json_path: str, category: str) -> LoadedSkill:
         json_data = self._read_json(json_path)
