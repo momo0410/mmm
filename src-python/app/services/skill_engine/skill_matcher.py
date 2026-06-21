@@ -26,6 +26,35 @@ class SkillMatch:
 class SkillMatcher:
     """根据请求匹配相关 skill"""
 
+    # 服务指纹 → skill name 直接映射（当检测到这些服务时优先匹配对应 skill）
+    SERVICE_SKILL_MAP: dict[str, str] = {
+        "vsftpd": "exploit-vsftpd-backdoor",
+        "samba": "exploit-samba-usermap",
+        "smbd": "exploit-samba-usermap",
+        "unrealircd": "exploit-irc-backdoor",
+        "distccd": "exploit-distcc-command-exec",
+        "distcc": "exploit-distcc-command-exec",
+        "java-rmi": "exploit-java-rmi",
+        "rmiregistry": "exploit-java-rmi",
+        "bindshell": "exploit-bindshell",
+        "postgresql": "exploit-postgres-weak-creds",
+        "postgres": "exploit-postgres-weak-creds",
+        "tomcat": "exploit-tomcat-default-creds",
+        "mysql": "exploit-mysql-weak-creds",
+        "vnc": "exploit-vnc-noauth",
+        "nfs": "exploit-nfs-privesc",
+        "php": "exploit-php-cgi",
+        "openssh": "exploit-ssh-bruteforce",
+        "ssh": "exploit-ssh-bruteforce",
+        "telnet": "exploit-telnet-bruteforce",
+        "proftpd": "exploit-telnet-bruteforce",
+        "drb": "exploit-druby-rce",
+        "ruby": "exploit-druby-rce",
+        "rlogin": "exploit-rlogin-rsh",
+        "ircd": "exploit-irc-backdoor",
+        "irc": "exploit-irc-backdoor",
+    }
+
     # 预定义关键词 → domain/subdomain 映射
     KEYWORD_DOMAIN_MAP = {
         # 渗透测试相关
@@ -102,11 +131,22 @@ class SkillMatcher:
         query_lower = query.lower()
         query_words = set(re.findall(r"\w+", query_lower))
 
+        # 服务指纹直匹配：检查 query 中是否包含已知服务名
+        service_boost: dict[str, float] = {}  # skill_name -> boost score
+        for service_key, skill_name in self.SERVICE_SKILL_MAP.items():
+            if service_key in query_lower:
+                service_boost[skill_name] = max(service_boost.get(skill_name, 0), 15.0)
+
         candidates: list[SkillMatch] = []
 
         for skill in skills:
             score = 0.0
             reasons = []
+
+            # 服务指纹直匹配加分
+            if skill.name in service_boost:
+                score += service_boost[skill.name]
+                reasons.append(f"service-skill match: {skill.name}")
 
             if domain and skill.domain != domain:
                 continue
@@ -221,7 +261,7 @@ class SkillMatcher:
                     lines.append("")
 
                 if "workflow" in target_sections and sections.workflow:
-                    lines.append("**工作流程:**")
+                    lines.append("**工作流程（按此执行）:**")
                     lines.append(sections.workflow[:2000])
                     lines.append("")
 
@@ -229,6 +269,14 @@ class SkillMatcher:
                     lines.append("**关键概念:**")
                     lines.append(sections.key_concepts[:400])
                     lines.append("")
+
+                # 注入其他所有 section（包括自定义的 Exploitation Steps 等）
+                if sections.other:
+                    for section_name, section_content in sections.other.items():
+                        if section_content and len(section_content.strip()) > 10:
+                            lines.append(f"**{section_name}:**")
+                            lines.append(section_content[:1500])
+                            lines.append("")
 
             lines.append("---")
             lines.append("")
