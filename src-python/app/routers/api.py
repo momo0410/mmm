@@ -1618,8 +1618,8 @@ class PentestStartRequest(BaseModel):
     base_url: str = Field("https://api.openai.com/v1", description="LLM API 地址")
     provider: str = Field("openai", description="LLM 提供商: openai/deepseek/qwen/ollama")
     temperature: float = Field(0.3, ge=0, le=2, description="LLM 温度")
-    llm_max_tokens: int = Field(600, ge=128, le=4096, description="LLM 最大输出 token")
-    llm_timeout_seconds: int = Field(60, ge=10, le=600, description="LLM 单次请求超时时间")
+    llm_max_tokens: int = Field(1500, ge=128, le=8192, description="LLM 最大输出 token")
+    llm_timeout_seconds: int = Field(120, ge=10, le=600, description="LLM 单次请求超时时间")
     llm_max_retries: int = Field(1, ge=0, le=10, description="LLM 请求最大重试次数")
     llm_retry_backoff_seconds: float = Field(1.2, ge=0.1, le=30.0, description="LLM 重试退避秒数")
 
