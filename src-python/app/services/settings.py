@@ -24,6 +24,16 @@ class SSHSettings(BaseModel):
     keep_alive_interval: int = 30000
     connection_timeout: int = 0
     max_retries: int = 3
+
+
+class OnlineSearchSettings(BaseModel):
+    """联网检索配置（见 docs/handoff-03-online-search-design.md 第十节）"""
+    enabled: bool = True
+    max_calls_per_pentest: int = 10
+    vulners_api_key: str = ""
+    shodan_api_key: str = ""
+    timeout_seconds: int = 15
+    cache_dir: str = ""  # 空则用默认 ~/.cache/sdit/online_search
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     theme: str = "light"
@@ -38,6 +48,7 @@ class AppSettings(BaseModel):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     ui: UISettings = Field(default_factory=UISettings)
     ssh: SSHSettings = Field(default_factory=SSHSettings)
+    online_search: OnlineSearchSettings = Field(default_factory=OnlineSearchSettings)
 def get_app_data_dir() -> Path:
     if platform.system() == "Windows":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))

@@ -31,12 +31,12 @@ class SkillMatcher:
         "vsftpd": "exploit-vsftpd-backdoor",
         "samba": "exploit-samba-usermap",
         "smbd": "exploit-samba-usermap",
-        "unrealircd": "exploit-irc-backdoor",
+        "unrealircd": "exploit-unrealircd-backdoor",
         "distccd": "exploit-distcc-command-exec",
         "distcc": "exploit-distcc-command-exec",
         "java-rmi": "exploit-java-rmi",
         "rmiregistry": "exploit-java-rmi",
-        "bindshell": "exploit-bindshell",
+        "bindshell": "exploit-vsftpd-backdoor",
         "postgresql": "exploit-postgres-weak-creds",
         "postgres": "exploit-postgres-weak-creds",
         "tomcat": "exploit-tomcat-default-creds",
@@ -47,12 +47,16 @@ class SkillMatcher:
         "openssh": "exploit-ssh-bruteforce",
         "ssh": "exploit-ssh-bruteforce",
         "telnet": "exploit-telnet-bruteforce",
-        "proftpd": "exploit-telnet-bruteforce",
+        "proftpd": "exploit-proftpd-modcopy",
         "drb": "exploit-druby-rce",
         "ruby": "exploit-druby-rce",
         "rlogin": "exploit-rlogin-rsh",
         "ircd": "exploit-irc-backdoor",
         "irc": "exploit-irc-backdoor",
+        "nfsd": "exploit-nfs-privesc",
+        "mountd": "exploit-nfs-privesc",
+        "rsh": "exploit-rlogin-rsh",
+        "rexec": "exploit-rlogin-rsh",
     }
 
     # 预定义关键词 → domain/subdomain 映射
@@ -220,14 +224,18 @@ class SkillMatcher:
         self,
         matches: list[SkillMatch],
         include_sections: Optional[list[str]] = None,
+        phase: str = "planning",
     ) -> str:
         """
         将匹配的 skill 知识格式化为可注入 LLM prompt 的文本
 
         Args:
             matches: 匹配结果
-            include_sections: 要包含的节，默认全部
-                ["when_to_use", "workflow", "key_concepts", "prerequisites"]
+            include_sections: 要包含的节，默认自动分层
+            phase: 当前阶段
+                "planning"  — 规划阶段: 注入原理+检测指纹+迁移规则（教学为主）
+                "execution" — 执行阶段: 注入 workflow + failure_modes
+                "recovery"  — 失败恢复: 重点注入 failure_modes（回退策略）
 
         Returns:
             格式化的知识文本
@@ -235,48 +243,110 @@ class SkillMatcher:
         if not matches:
             return ""
 
-        lines = ["## 可用技能知识", ""]
-        default_sections = ["when_to_use", "workflow", "key_concepts"]
+        # ── 反过拟合开场白：让模型把 skill 当参考而非命令 ─────────────
+        preamble = [
+            "## 可用技能知识（参考用，非强制脚本）",
+            "",
+            "**重要提示**：以下技能知识是基于历史经验整理的**参考方案**，"
+            "并非必须照搬的固定命令序列。请遵循以下使用原则：",
+            "",
+            "- **先理解再行动**：重点看 *Principle*（原理）和 *Detection Fingerprint*"
+            "（指纹），先判断是否真的适用于当前目标",
+            "- **可以调整**：若当前情况与 skill 描述不完全匹配，请基于 *Principle* 推演新方案，"
+            "在响应中说明你为什么偏离 skill 提供的 workflow",
+            "- **可以跳过**：若指纹不符（例如版本不对、端口不开），请明确说明跳过此 skill 的原因，"
+            "不要硬套",
+            "- **重点参考迁移规则**：*Generalization* 章节提供同类漏洞的通用方法论，"
+            "对当前目标的指导价值往往大于具体的 *Workflow*",
+            "- **失败时查 Failure Modes**：一次尝试失败不等于此 skill 不适用，先查表再决定回退",
+            "",
+            "在执行任何 skill 中的命令前，请在你的规划中给出一段简短的适用性判断："
+            "（1）当前目标与 skill 指纹的匹配度；（2）是否需要按 Principle 调整 workflow；"
+            "（3）首要尝试方法与备选方法。",
+            "",
+            "---",
+            "",
+        ]
+        lines = list(preamble)
+
+        # ── 按阶段自动选择注入优先级 ─────────────────────────
+        planning_first = ["principle", "detection_fingerprint", "generalization",
+                          "when_to_use", "key_concepts", "prerequisites"]
+        execution_first = ["workflow", "detection_fingerprint", "failure_modes",
+                           "key_concepts", "principle"]
+
+        if include_sections:
+            section_order = include_sections
+        elif phase == "recovery":
+            section_order = ["failure_modes", "workflow", "detection_fingerprint",
+                             "key_concepts"]
+        elif phase == "execution":
+            section_order = execution_first
+        else:
+            section_order = planning_first
 
         for i, match in enumerate(matches, 1):
             skill = match.skill
             lines.append(f"### 技能 {i}: {skill.name}")
             lines.append(f"描述: {skill.description}")
             lines.append(f"领域: {skill.domain}/{skill.subdomain}")
+            if skill.cve:
+                lines.append(f"CVE: {skill.cve}")
             lines.append(f"匹配分数: {match.score:.1f}")
             lines.append("")
 
             if skill.md_data:
                 sections = skill.md_data.sections
-                target_sections = include_sections or default_sections
+                injected = set()
+                max_chars_per_skill = 3000
+                used = 0
 
-                if "when_to_use" in target_sections and sections.when_to_use:
-                    lines.append("**何时使用:**")
-                    lines.append(sections.when_to_use[:500])
+                for section_key in section_order:
+                    if used >= max_chars_per_skill:
+                        break
+
+                    section_value = getattr(sections, section_key, None)
+                    if not section_value or not section_value.strip():
+                        continue
+
+                    section_label = {
+                        "principle": "▸ 漏洞原理（理解为什么）",
+                        "detection_fingerprint": "▸ 检测指纹（何时触发此 skill）",
+                        "failure_modes": "▸ 失败回退（这一步不行怎么办）",
+                        "generalization": "▸ 迁移规则（今后遇到同类题怎么做）",
+                        "when_to_use": "▸ 何时使用",
+                        "prerequisites": "▸ 前提条件",
+                        "workflow": "▸ 工作流程（按此执行）",
+                        "key_concepts": "▸ 关键信息速查",
+                        "tools_and_systems": "▸ 所需工具",
+                        "common_scenarios": "▸ 常见场景",
+                        "output_format": "▸ 输出格式",
+                    }.get(section_key, f"▸ {section_key}")
+
+                    if section_key in ("workflow", "failure_modes", "principle", "generalization"):
+                        limit = 2000
+                    else:
+                        limit = 600
+
+                    text = section_value[:limit]
+                    lines.append(f"**{section_label}:**")
+                    lines.append(text)
                     lines.append("")
+                    used += len(text)
+                    injected.add(section_key)
 
-                if "prerequisites" in target_sections and sections.prerequisites:
-                    lines.append("**前提条件:**")
-                    lines.append(sections.prerequisites[:300])
-                    lines.append("")
-
-                if "workflow" in target_sections and sections.workflow:
-                    lines.append("**工作流程（按此执行）:**")
-                    lines.append(sections.workflow[:2000])
-                    lines.append("")
-
-                if "key_concepts" in target_sections and sections.key_concepts:
-                    lines.append("**关键概念:**")
-                    lines.append(sections.key_concepts[:400])
-                    lines.append("")
-
-                # 注入其他所有 section（包括自定义的 Exploitation Steps 等）
-                if sections.other:
+                # 其他自定义 section 兜底注入（空间剩余时）
+                if sections.other and used < max_chars_per_skill:
                     for section_name, section_content in sections.other.items():
                         if section_content and len(section_content.strip()) > 10:
-                            lines.append(f"**{section_name}:**")
-                            lines.append(section_content[:1500])
-                            lines.append("")
+                            if section_name not in injected:
+                                remaining = max_chars_per_skill - used
+                                if remaining < 100:
+                                    break
+                                lines.append(f"**{section_name}:**")
+                                lines.append(section_content[:remaining])
+                                lines.append("")
+                                used += len(section_content[:remaining])
 
             lines.append("---")
             lines.append("")

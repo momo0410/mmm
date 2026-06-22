@@ -49,6 +49,11 @@ class SkillMdSections:
     tools_and_systems: str = ""
     common_scenarios: str = ""
     output_format: str = ""
+    # ── 教学型 skill 新增章节 ───────────────────────────
+    principle: str = ""           # 漏洞原理（CVE 成因、内部机制）
+    detection_fingerprint: str = ""  # 检测指纹（何时该触发此 skill）
+    failure_modes: str = ""       # 失败回退（什么失败了、下一步做什么）
+    generalization: str = ""      # 迁移规则（遇到同类漏洞怎么做）
     other: dict[str, str] = field(default_factory=dict)
 
 
@@ -82,6 +87,27 @@ _KNOWN_SECTIONS = {
     "output format": "output_format",
     "verification": "output_format",
     "summary": "key_concepts",
+    # ── 教学型 skill 新增章节别名（中英文） ───────────────
+    "principle": "principle",
+    "原理": "principle",
+    "漏洞原理": "principle",
+    "vulnerability principle": "principle",
+    "detection fingerprint": "detection_fingerprint",
+    "fingerprint": "detection_fingerprint",
+    "检测指纹": "detection_fingerprint",
+    "trigger": "detection_fingerprint",
+    "trigger condition": "detection_fingerprint",
+    "failure modes": "failure_modes",
+    "failure mode": "failure_modes",
+    "fallback": "failure_modes",
+    "失败回退": "failure_modes",
+    "失败处理": "failure_modes",
+    "generalization": "generalization",
+    "generalize": "generalization",
+    "migration": "generalization",
+    "迁移规则": "generalization",
+    "举一反三": "generalization",
+    "类似漏洞": "generalization",
 }
 
 

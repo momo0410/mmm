@@ -49,6 +49,9 @@ class LoadedSkill:
 
     knowledge_file: str = ""
 
+    cve: str = ""          # 关联 CVE 编号（如 CVE-2011-2523）
+    severity: str = ""     # 严重程度（critical / high / medium / low）
+
     def to_api_dict(self) -> dict[str, Any]:
         result = {
             "name": self.name,
@@ -251,6 +254,13 @@ class SkillLoader:
             if md_data.meta.nist_csf:
                 nist_csf = md_data.meta.nist_csf
 
+        # 从 frontmatter extra 提取 cve / severity（新模板字段）
+        cve = ""
+        severity = ""
+        if md_data and md_data.meta.extra:
+            cve = str(md_data.meta.extra.get("cve", "") or "")
+            severity = str(md_data.meta.extra.get("severity", "") or "")
+
         return LoadedSkill(
             name=name or os.path.basename(dir_path),
             description=description,
@@ -270,6 +280,8 @@ class SkillLoader:
             subdomain=subdomain,
             nist_csf=nist_csf,
             knowledge_file=knowledge_file,
+            cve=cve,
+            severity=severity,
         )
 
     @staticmethod
