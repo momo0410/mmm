@@ -133,8 +133,9 @@ frontmatter 字段: name, description, domain, subdomain, tags, cve, severity, v
 
 - skills/exploit-skills/ 17 个新目录
 - skills/learned/ 空目录运行时生成
-- src-python/app/services/pentest_agent/kali_executor.py
-- pentest_auto.py, test_exploit_flow.py
+- src-python/app/services/pentest_agent/kali_executor.py（v2 凭据安全版）
+- src-python/app/services/discover.py（多靶机发现服务）
+- test_exploit_flow.py
 
 ---
 
