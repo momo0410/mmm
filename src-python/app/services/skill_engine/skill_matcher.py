@@ -36,7 +36,8 @@ class SkillMatcher:
         "distcc": "exploit-distcc-command-exec",
         "java-rmi": "exploit-java-rmi",
         "rmiregistry": "exploit-java-rmi",
-        "bindshell": "exploit-vsftpd-backdoor",
+        "bindshell": "exploit-generic-bindshell",
+        "backdoor": "exploit-generic-bindshell",
         "postgresql": "exploit-postgres-weak-creds",
         "postgres": "exploit-postgres-weak-creds",
         "tomcat": "exploit-tomcat-default-creds",
@@ -57,6 +58,8 @@ class SkillMatcher:
         "mountd": "exploit-nfs-privesc",
         "rsh": "exploit-rlogin-rsh",
         "rexec": "exploit-rlogin-rsh",
+        "apache": "exploit-apache-http",
+        "httpd": "exploit-apache-http",
     }
 
     # 预定义关键词 → domain/subdomain 映射
